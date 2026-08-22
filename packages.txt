@@ -1,5 +1,1 @@
-# Debian apt packages for Streamlit Community Cloud (apt-get install <name>).
-# ffmpeg provides a robust decoding fallback for MP3 and other compressed
-# audio formats beyond what the bundled libsndfile in the soundfile wheel
-# guarantees across environments.
 ffmpeg
