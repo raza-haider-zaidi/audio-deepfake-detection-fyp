@@ -46,6 +46,9 @@ models:
       the sibling candidate's verified implementation) as a documented,
       unverified assumption. Treat as higher-risk for deployment until this
       is resolved.
+      PHASE 3: retained for research purposes only. Not used by the
+      Streamlit MVP (app/model_loader.py hardcodes sara_wav2vec2 as the
+      deployment model). Must remain disabled for production use.
 
   sara_wav2vec2:
     id: sara_wav2vec2
@@ -67,12 +70,15 @@ models:
     training_dataset: ASVspoof 2019 LA training partition (25,380 utterances)
     source_repository: https://github.com/Saracasm/deepfake-audio-detection
     source_repository_status: "VERIFIED (HTTP 200) — exact model class and preprocessing confirmed from source"
-    deployment_role: primary_research_candidate
+    deployment_role: primary_deployment
     notes: >
       Author-reported eval EER 5.55% on ASVspoof 2019 LA, 9.09% on
       ASVspoof 2021 LA (cross-dataset), 29.4% mean on WaveFake. Source
       repository confirmed working; label mapping confirmed directly from
       inference source code (probs[:, 1] = spoof).
+      PHASE 3: selected as the Streamlit MVP deployment model based on the
+      Phase 2 preliminary recommendation (fully reproducible loading path,
+      verified label semantics). See docs/streamlit_mvp.md.
 
   hf_reference:
     id: hf_reference

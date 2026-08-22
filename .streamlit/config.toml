@@ -1,0 +1,19 @@
+# Streamlit configuration. No secrets belong in this file — see
+# .env.example for local environment variables instead.
+
+[server]
+# Keep the default upload limit reasonable; app-level validation
+# (app/validation.py) enforces a stricter 25 MB / 30-second limit on top
+# of this. 200 MB is Streamlit's own default; we lower it slightly since
+# this app never needs large uploads.
+maxUploadSize = 50
+# Community Cloud manages CORS/XSRF itself; leave protections enabled for
+# local runs rather than disabling them for convenience.
+enableXsrfProtection = true
+enableCORS = true
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+base = "light"

@@ -17,7 +17,7 @@
 
 No ML model, dataset, or UI code is implemented in this phase.
 
-## Phase 2 — CPU-Only Wav2Vec2 Model Selection & Inference Benchmarking (this phase)
+## Phase 2 — CPU-Only Wav2Vec2 Model Selection & Inference Benchmarking (complete)
 
 Purpose: determine which pretrained Wav2Vec2-based audio deepfake detector
 gives the best practical balance of documentation quality, CPU inference
@@ -68,15 +68,51 @@ suitability. This phase does **not** implement the Streamlit frontend.
       distinguishing "best research candidate" from "best deployment
       candidate" — see the Phase 2 completion report
 
-## Phase 3 — Streamlit MVP (not started)
+## Phase 3 — CPU Streamlit MVP (complete)
 
-- [ ] Build a minimal Streamlit demonstration app under `app/`, calling only
-      into `src/audio_deepfake_detector/inference/service.py`
-- [ ] Manually verify end-to-end on CPU: upload audio -> prediction
-      displayed, using the model selected as the deployment candidate in
-      Phase 2
-- [ ] Add Streamlit to `pyproject.toml` dependencies at that point (not
-      before)
+Purpose: build a polished, functional, CPU-only Streamlit web application
+around the Phase 2 inference backend, deployable to Streamlit Community
+Cloud, using `sara_wav2vec2` as the deployment model. This phase does
+**not** create a GitHub repository or deploy to Streamlit Cloud.
+
+- [x] Verify repository state clean; confirm `.venv` interpreter
+- [x] Install Streamlit + matplotlib; update `pyproject.toml`
+- [x] Create root-level `requirements.txt` (CPU PyTorch via
+      `--extra-index-url`, pinned versions) and `packages.txt` (`ffmpeg`)
+      for Streamlit Community Cloud
+- [x] Create `streamlit_app.py` entrypoint + `app/` presentation-layer
+      helpers (`errors.py`, `validation.py`, `formatting.py`,
+      `visualizations.py`, `model_loader.py`) — no model logic duplicated
+      outside `src/audio_deepfake_detector/`
+- [x] Implement lazy, `st.cache_resource`-cached model loading pinned to
+      revision `6c43629c953d6ff008501bf5f3eb983ac2321ad6`; verified the
+      ~468 MiB model is not loaded on page visit, only on first "Analyze
+      Audio" click, and is reused (not reloaded) on repeated analysis
+- [x] Implement upload validation (30 s max duration, 25 MB max size,
+      WAV/MP3/FLAC, friendly errors, no permanent storage)
+- [x] Implement full-clip windowed inference reusing the existing
+      `sara_wav2vec2` adapter (no silent first-4-seconds-only truncation),
+      result card, window-level table, waveform plot, mel spectrogram,
+      technical details expander, "Why Wav2Vec2?" explainer, research
+      disclaimer — author-reported metrics intentionally kept off the main
+      result view
+- [x] Create `.streamlit/config.toml` (safe server/theme config, no
+      secrets)
+- [x] Create `scripts/benchmark_streamlit_resources.py` (dev-only process
+      RSS diagnostic: startup / after load / after analysis)
+- [x] Portability audit: no hardcoded Windows paths, no unnecessary
+      CUDA/NVIDIA references in production code (found and fixed one
+      documentation inconsistency in `.env.example`)
+- [x] Expand pytest coverage: app formatting/validation/visualization/
+      model-loader unit tests plus a Streamlit `AppTest`-based render test
+      confirming no model load on initial page render — all in the default
+      (non-integration) suite
+- [x] Manually verify end-to-end on CPU: launched the real app locally,
+      uploaded a smoke WAV through the browser, clicked Analyze, confirmed
+      real inference, result card, waveform, spectrogram, and technical
+      details all render correctly, and repeated analysis reuses the
+      cached model
+- [x] Write `docs/streamlit_mvp.md` and `docs/deployment.md`
 
 ## Phase 4 — Research Extension (not started)
 
