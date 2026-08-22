@@ -1,0 +1,60 @@
+"""Pure formatting helpers for presenting PredictionResult in the UI.
+
+Kept free of any Streamlit import so these are trivially unit-testable.
+"""
+
+from __future__ import annotations
+
+from audio_deepfake_detector.utils.datatypes import PredictionResult
+
+FRIENDLY_LABELS = {
+    "BONAFIDE": "Likely Real / Bonafide",
+    "SPOOF": "Likely AI-Generated / Spoofed",
+}
+
+
+def friendly_label(normalized_label: str) -> str:
+    """Map a normalized label (BONAFIDE/SPOOF) to a user-facing phrase."""
+    return FRIENDLY_LABELS.get(normalized_label, normalized_label)
+
+
+def format_percentage(value: float) -> str:
+    """Format a 0-1 probability as a percentage string, e.g. '87.4%'."""
+    return f"{value * 100:.1f}%"
+
+
+def result_summary(result: PredictionResult) -> dict[str, str]:
+    """Return the primary result-card fields as display-ready strings."""
+    bonafide_prob = result.probabilities.get("bonafide", 0.0)
+    spoof_prob = result.probabilities.get("spoof", 0.0)
+    return {
+        "prediction": friendly_label(result.normalized_label),
+        "confidence": format_percentage(result.confidence),
+        "bonafide_probability": format_percentage(bonafide_prob),
+        "spoof_probability": format_percentage(spoof_prob),
+    }
+
+
+def window_table_rows(result: PredictionResult) -> list[dict[str, str]]:
+    """Build rows for the optional window-level analysis table."""
+    rows = []
+    for wp in result.window_predictions:
+        rows.append(
+            {
+                "Window": wp.window_index + 1,
+                "Start time (s)": f"{wp.start_sample / _sample_rate_hint(result):.2f}",
+                "End time (s)": f"{wp.end_sample / _sample_rate_hint(result):.2f}",
+                "Bonafide probability": format_percentage(wp.probabilities.get("bonafide", 0.0)),
+                "Spoof probability": format_percentage(wp.probabilities.get("spoof", 0.0)),
+                "Prediction": friendly_label(
+                    "BONAFIDE" if wp.raw_label == "bonafide" else "SPOOF"
+                ),
+            }
+        )
+    return rows
+
+
+def _sample_rate_hint(result: PredictionResult) -> float:
+    """Window start/end are stored in samples; assume the standard 16 kHz
+    pipeline rate used throughout this project for display purposes."""
+    return 16000.0
