@@ -1,0 +1,99 @@
+# Model registry configuration for CPU-only Wav2Vec2 deepfake detectors.
+#
+# This file is the single source of truth for which Hugging Face
+# repositories the code loads. No repository name or checkpoint filename
+# should be hardcoded elsewhere in src/audio_deepfake_detector.
+#
+# Every field marked "author-documented" below was verified against the
+# model's Hugging Face README and, where cited, its GitHub source
+# repository on 2026-08-23. See docs/model_candidate_analysis.md for full
+# citations and verification notes.
+
+models:
+  caa_wav2vec2:
+    id: caa_wav2vec2
+    repository: caa-speech-detection-asvspoof2019/wav2vec2-v2-unfrozen
+    revision: 71250c8366e164e292e19a0451d85747038d2ed3
+    enabled: true
+    architecture: wav2vec2-base + top-4-layer-unfrozen + MLP head (Linear 768->256->2)
+    base_model: facebook/wav2vec2-base
+    sample_rate: 16000
+    window_seconds: 4.0
+    window_samples: 64000
+    checkpoint_filename: best.pt
+    checkpoint_size_bytes: 606800672
+    label_mapping:
+      0: bonafide
+      1: spoof
+    license: MIT
+    training_dataset: ASVspoof 2019 LA train split
+    source_repository: https://github.com/sebastiaoteixeira/caa-ai-generated-speech-detector
+    source_repository_status: "NOT FOUND (HTTP 404 verified 2026-08-23) — architecture reconstruction relies on documented head description + checkpoint state_dict inspection, not the missing source"
+    deployment_role: research_candidate_unverified_source
+    notes: >
+      Author-reported eval EER 1.55% on ASVspoof 2019 LA, In-the-Wild EER
+      27.68%. Cited source repository does not exist (verified 404).
+      Checkpoint state_dict keys (class_weights[2], classifier.0
+      Linear(768,256), classifier.3 Linear(256,2), encoder.* backbone,
+      215 keys total) structurally match the documented head architecture.
+      Loading against the checkpoint-derived reconstruction is missing
+      exactly one key (encoder.masked_spec_embed, a SpecAugment masking
+      embedding the model card says is disabled at inference) and has zero
+      unexpected keys; load and CPU inference both succeeded. However, the
+      pooling operation before the classifier head has no learnable
+      parameters and is NOT verifiable from either the state_dict or the
+      missing source; this adapter assumes mean-pooling over time (matching
+      the sibling candidate's verified implementation) as a documented,
+      unverified assumption. Treat as higher-risk for deployment until this
+      is resolved.
+
+  sara_wav2vec2:
+    id: sara_wav2vec2
+    repository: Sara1708/deepfake-audio-wav2vec2
+    revision: 6c43629c953d6ff008501bf5f3eb983ac2321ad6
+    enabled: true
+    architecture: wav2vec2-base + top-2-layer-unfrozen + mean-pool + linear head (768->2)
+    base_model: facebook/wav2vec2-base
+    sample_rate: 16000
+    window_seconds: 4.0
+    window_samples: 64000
+    window_hop_samples: 32000
+    checkpoint_filename: stage2_best.pt
+    checkpoint_size_bytes: 491044441
+    label_mapping:
+      0: bonafide
+      1: spoof
+    license: Apache-2.0
+    training_dataset: ASVspoof 2019 LA training partition (25,380 utterances)
+    source_repository: https://github.com/Saracasm/deepfake-audio-detection
+    source_repository_status: "VERIFIED (HTTP 200) — exact model class and preprocessing confirmed from source"
+    deployment_role: primary_research_candidate
+    notes: >
+      Author-reported eval EER 5.55% on ASVspoof 2019 LA, 9.09% on
+      ASVspoof 2021 LA (cross-dataset), 29.4% mean on WaveFake. Source
+      repository confirmed working; label mapping confirmed directly from
+      inference source code (probs[:, 1] = spoof).
+
+  hf_reference:
+    id: hf_reference
+    repository: mo-thecreator/Deepfake-audio-detection
+    revision: e4d9874b493362149cec96ced85f00b00b1a04c0
+    enabled: false
+    architecture: Wav2Vec2ForSequenceClassification (standard transformers AutoModelForAudioClassification)
+    base_model: mo-thecreator/wav2vec2-base-finetuned
+    sample_rate: 16000
+    window_seconds: null
+    window_samples: null
+    checkpoint_filename: model.safetensors
+    checkpoint_size_bytes: null
+    label_mapping: {}
+    license: Apache-2.0
+    training_dataset: "Not documented"
+    source_repository: null
+    source_repository_status: "N/A — standard transformers integration, no custom source needed"
+    deployment_role: engineering_reference_only
+    notes: >
+      Optional engineering reference for standard AutoProcessor /
+      AutoModelForAudioClassification integration. Not a primary research
+      candidate: no reported EER, no documented training corpus, no
+      documented label mapping. Disabled by default.

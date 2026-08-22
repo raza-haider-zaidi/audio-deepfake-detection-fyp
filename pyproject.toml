@@ -6,10 +6,27 @@ readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = { text = "MIT" }
 
-# Phase 1: no runtime dependencies pinned yet. ML/audio/UI dependencies
-# (torch, torchaudio, transformers, streamlit, etc.) are added when the
-# MVP pretrained-model integration begins, not during environment setup.
-dependencies = []
+# Phase 2: CPU-only ML/audio dependencies for pretrained Wav2Vec2 deepfake
+# detector integration and benchmarking. Streamlit is intentionally not yet
+# added (Phase 2 is model selection/benchmarking, not the frontend).
+# torch/torchaudio are installed separately from the PyTorch CPU wheel index
+# (https://download.pytorch.org/whl/cpu) — see README.md setup instructions;
+# they are NOT resolvable from PyPI alone with the +cpu build tag.
+dependencies = [
+    "torch>=2.13,<3",
+    "torchaudio>=2.11,<3",
+    "transformers>=5.15,<6",
+    "huggingface_hub>=1.28,<2",
+    "safetensors>=0.8,<1",
+    "numpy>=2.5,<3",
+    "scipy>=1.18,<2",
+    "soundfile>=0.14,<1",
+    "librosa>=1.0,<2",
+    "pydantic>=2.13,<3",
+    "pydantic-settings>=2.15,<3",
+    "PyYAML>=6.0,<7",
+    "psutil>=7.2,<8",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -18,7 +35,11 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
+markers = [
+    "integration: real model download/load/inference tests (network + large downloads required)",
+    "slow: tests that take a long time to run and are excluded from the default suite",
+]
 
 [build-system]
 requires = ["setuptools>=68"]

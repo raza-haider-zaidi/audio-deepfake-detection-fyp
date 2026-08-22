@@ -13,6 +13,13 @@ extensions) unless the user explicitly overrides one for a specific task.
 - Do not create, modify, or depend on any virtual environment outside this
   project directory.
 - Target Python 3.12 for compatibility with PyTorch/torchaudio/Transformers.
+- **The production/deployment target is CPU-only.** Install `torch`/
+  `torchaudio` from the official CPU wheel index
+  (`https://download.pytorch.org/whl/cpu`), never a CUDA build. Do not
+  optimize for or depend on the development machine's GPU. All code must
+  support `device="cpu"` and `device="auto"`, and `"auto"` must always
+  safely fall back to CPU — there is no code path in this project that
+  requires CUDA.
 
 ## Data and Models
 
@@ -27,6 +34,15 @@ extensions) unless the user explicitly overrides one for a specific task.
   assumed identifier.
 - Preserve reproducibility: pin dependency versions, record random seeds,
   and document exact commands used to produce any result in `results/`.
+- **Never trust a model card's prose alone for architecture or label
+  mapping.** Verify against the actual cited source repository/code where
+  one exists. If a cited source repository cannot be found or does not
+  exist, record that as a documented finding — do not invent an
+  architecture merely to make a checkpoint's `state_dict` load.
+- Clearly separate author-reported/model-card metrics from metrics actually
+  measured by this project. Never present a model card's EER as if this
+  project reproduced it, and never present a prediction on synthetic smoke
+  audio as accuracy evidence.
 
 ## Code Organisation
 
@@ -36,9 +52,19 @@ extensions) unless the user explicitly overrides one for a specific task.
   library, not contain model logic itself.
 - Use modular model adapters under `src/audio_deepfake_detector/models/` so
   new detection approaches can be added and swapped without changing
-  inference or evaluation code.
+  inference or evaluation code. Adapters implement the
+  `BaseDeepfakeDetector` interface (`models/base.py`) and are resolved via
+  `models/registry.py`, which reads `configs/models.yaml`. No repository
+  name or checkpoint filename should be hardcoded anywhere else.
+- Shared audio preprocessing (`preprocessing/audio_loader.py`) must not
+  crop/pad audio to a fixed length — that is model-specific and belongs in
+  each adapter (using the shared `preprocessing/windowing.py` primitive).
 - Add tests under `tests/` for every meaningful implementation phase (not
   just at the end of the project). Run the test suite before committing.
+  Mark tests that download real model checkpoints or run real inference
+  with `@pytest.mark.integration` / `@pytest.mark.slow`; the default suite
+  (`pytest -m "not integration and not slow"`) must never trigger a large
+  download.
 
 ## Git Workflow
 

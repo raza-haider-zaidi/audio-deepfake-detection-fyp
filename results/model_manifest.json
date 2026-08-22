@@ -1,0 +1,52 @@
+{
+  "note": "Metadata only. No model weights are committed to this repository.",
+  "test_date": "2026-08-23",
+  "device": "cpu",
+  "pytorch_version": "2.13.0+cpu",
+  "transformers_version": "5.15.1",
+  "models": [
+    {
+      "model_id": "caa_wav2vec2",
+      "repository": "caa-speech-detection-asvspoof2019/wav2vec2-v2-unfrozen",
+      "resolved_revision": "71250c8366e164e292e19a0451d85747038d2ed3",
+      "license": "MIT",
+      "checkpoint_filename": "best.pt",
+      "checkpoint_size_bytes": 606800672,
+      "base_architecture": "facebook/wav2vec2-base + top-4-layer-unfrozen + MLP head (Linear 768->256->2)",
+      "expected_sample_rate": 16000,
+      "expected_input_length_samples": 64000,
+      "label_mapping": {"0": "bonafide", "1": "spoof"},
+      "label_mapping_evidence": "Documented in HF model card usage snippet (probs[:, 0] = bonafide, probs[:, 1] = spoof). Not independently code-verified because the cited source repository does not exist.",
+      "source_repository": "https://github.com/sebastiaoteixeira/caa-ai-generated-speech-detector",
+      "source_repository_verified": false,
+      "source_repository_status": "HTTP 404 confirmed 2026-08-23 - repository does not exist",
+      "checkpoint_load_result": "SUCCEEDED with one explicitly allow-listed missing key (encoder.masked_spec_embed, a SpecAugment masking embedding the model card states is unused because encoder masking is disabled at inference); zero unexpected keys.",
+      "architecture_verification_method": "Reconstructed from checkpoint state_dict key names/shapes (215 keys) cross-checked against the model card's documented head description. Pooling operation before the classifier head has no learnable parameters and could not be verified; mean pooling over time was assumed (see docs/model_candidate_analysis.md).",
+      "device": "cpu",
+      "deployment_safety": "NOT recommended for deployment without further verification: pooling operation is an unverified assumption and the cited source repository does not exist.",
+      "test_date": "2026-08-23"
+    },
+    {
+      "model_id": "sara_wav2vec2",
+      "repository": "Sara1708/deepfake-audio-wav2vec2",
+      "resolved_revision": "6c43629c953d6ff008501bf5f3eb983ac2321ad6",
+      "license": "Apache-2.0",
+      "checkpoint_filename": "stage2_best.pt",
+      "checkpoint_size_bytes": 491044441,
+      "base_architecture": "facebook/wav2vec2-base + top-2-layer-unfrozen + mean-pool + linear head (768->2)",
+      "expected_sample_rate": 16000,
+      "expected_input_length_samples": 64000,
+      "expected_window_hop_samples": 32000,
+      "label_mapping": {"0": "bonafide", "1": "spoof"},
+      "label_mapping_evidence": "Confirmed directly from source code (src/inference/predict.py: probs[:, 1] = spoof probability).",
+      "source_repository": "https://github.com/Saracasm/deepfake-audio-detection",
+      "source_repository_verified": true,
+      "source_repository_status": "HTTP 200 confirmed 2026-08-23 - repository exists and was inspected directly",
+      "checkpoint_load_result": "SUCCEEDED. state_dict keys (213 total: backbone.* + classifier.weight/bias [2, 768]) match the verified source class Wav2VecClassifier exactly.",
+      "architecture_verification_method": "Exact model class (Wav2VecClassifier), windowing/padding logic, and label index order all confirmed from the cited GitHub source repository, not reconstructed from the checkpoint alone.",
+      "device": "cpu",
+      "deployment_safety": "Fully reproducible loading path with verified label semantics. Best candidate for reliable deployment based on reproducibility (final ranking pending full benchmark comparison in docs/cpu_model_benchmark.md).",
+      "test_date": "2026-08-23"
+    }
+  ]
+}
