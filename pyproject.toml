@@ -36,6 +36,16 @@ dependencies = [
 dev = [
     "pytest>=8.0",
 ]
+# Dev/research-only dependencies for Phase 4 calibration experiments
+# (docs/inference_calibration.md). NOT part of requirements.txt / the
+# Streamlit Community Cloud deployment — calibration is an offline research
+# workflow, not a runtime dependency of the deployed app.
+calibration = [
+    "webrtcvad-wheels>=2.0,<3",
+    "datasets>=3.0,<4",
+    "pyarrow>=17.0",
+    "scikit-learn>=1.5,<2",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
