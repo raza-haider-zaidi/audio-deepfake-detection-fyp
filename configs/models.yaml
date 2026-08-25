@@ -80,6 +80,60 @@ models:
       Phase 2 preliminary recommendation (fully reproducible loading path,
       verified label semantics). See docs/streamlit_mvp.md.
 
+  antideepfake_wav2vec2_small:
+    id: antideepfake_wav2vec2_small
+    repository: nii-yamagishilab/wav2vec-small-anti-deepfake
+    revision: 9a13264b5dcc827a8d5a4f8e01fccefa392f886b
+    enabled: false
+    architecture: "Custom DeepfakeDetector (fairseq Wav2Vec2Model SSL frontend, wav2vec2-base config) + AdaptiveAvgPool1d + Linear(768->2) head. NOT a standard transformers Wav2Vec2ForSequenceClassification -- confirmed from the model's own published inference script."
+    base_model: facebook/wav2vec2-base
+    sample_rate: 16000
+    window_seconds: null
+    checkpoint_filename: model.safetensors
+    checkpoint_size_bytes: 380210632
+    label_mapping:
+      0: bonafide
+      1: spoof
+    license: CC-BY-NC-SA-4.0
+    training_dataset: "~56,000h genuine + ~18,000h fake/artifact speech, 100+ languages, post-trained on ASVspoof2019-LA/2021-LA/2021-DF/5, CFAD, DECRO, DFADD, MLAAD, SpoofCeleb, WaveFake, LibriTTS(-Vocoded/-R), VoxCeleb2(-Vocoded), FLEURS(-R), CodecFake/Codecfake, AISHELL3, CNCeleb2, MLS, and others (arXiv:2506.21090 Table I). RawBoost data augmentation applied."
+    source_repository: https://github.com/nii-yamagishilab/AntiDeepfake
+    source_repository_status: "VERIFIED (HTTP 200) -- official inference script (model card README.md) inspected directly; uses fairseq.models.wav2vec.Wav2Vec2Model as the SSL frontend, not transformers."
+    deployment_role: research_candidate_blocked_dependency
+    notes: >
+      PHASE 5 (generalization-focused replacement evaluation). Author-reported
+      EER (held-out, non-training datasets per the paper's own Table, quoted
+      as AUTHOR-REPORTED, not project-measured): ADD2023 4.67%, DEEP-VOICE
+      2.27%, FakeOrReal 0.46-0.63%, In-the-Wild 1.23%, Deepfake-Eval-2024
+      8.29-27.77%. Label mapping (index 0 = fake/spoof, index 1 = real/
+      bonafide) confirmed directly from the official inference script's
+      softmax indexing (`prob[1]` printed as "real prob", `prob[0]` as
+      "fake prob"), not assumed.
+      BLOCKED: the official/only documented inference path requires
+      `fairseq` (fairseq.models.wav2vec.Wav2Vec2Model), which does not
+      install in this project's CPU/Windows/Python 3.12 .venv. Verified by
+      two real, reproducible pip failures on 2026-08-26: (1) `pip install
+      fairseq` fails at the sdist build-requirements stage with
+      `FileNotFoundError: fairseq\\version.txt` (a broken 0.12.1 sdist on
+      PyPI, upstream packaging bug, unrelated to this project); (2) `pip
+      install git+https://github.com/facebookresearch/fairseq.git` also
+      fails to build. No verified ONNX or transformers-native re-export of
+      this checkpoint exists. Per project policy (CLAUDE.md: never invent
+      an architecture merely to make a checkpoint load), a hand-rolled
+      fairseq-to-transformers key-mapping reimplementation was NOT
+      attempted, because there is no working fairseq install in this
+      environment to verify numerical parity against -- an unverifiable
+      reimplementation risks silently wrong outputs, which is worse than
+      not integrating the model at all.
+      The adapter class below (CandidateAntiDeepfakeWav2Vec2Detector)
+      reproduces the official inference script's classes and forward pass
+      faithfully and imports fairseq lazily inside load(), so importing
+      this module does not fail -- but load() will raise ImportError in
+      this environment. It is disabled (enabled: false) and excluded from
+      the default test suite; only present so this work is not lost if the
+      dependency becomes installable (e.g. a future fairseq release, or a
+      Linux build environment) or a verified transformers-native port
+      appears. See docs/replacement_model_evaluation.md for full analysis.
+
   hf_reference:
     id: hf_reference
     repository: mo-thecreator/Deepfake-audio-detection
