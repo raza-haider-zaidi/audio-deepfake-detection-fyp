@@ -242,6 +242,65 @@ models:
       author/Arena-reported EER numbers (e.g. InTheWild 1.20%) are
       maintainer-reported only and are never presented as this project's
       own measured results anywhere in this codebase.
+      PRODUCTION-OPTIMIZATION UPDATE (feat/spectra-production-optimization):
+      dynamic INT8 quantization (onnxruntime.quantization.quantize_dynamic,
+      MatMul-only) was evaluated against this FP32 baseline. Result: 71.5%
+      smaller (1.28GB -> 364MB), ~1.9x faster cold load, ~2.15x less
+      resident memory, ~1.6x faster per-window inference, with NO
+      measurable accuracy degradation on the same 200-clip evaluation set
+      (bonafide FPR 3.0%->2.0%, F1 0.933->0.938, ROC-AUC 0.977->0.982, EER
+      2.0%->3.0% -- within small-sample noise, all Step-10 acceptance
+      criteria met). See spectra_aasist3_onnx_int8 below and
+      docs/spectra_production_optimization.md for the full analysis. The
+      FP32 threshold above (0.9299831390380859) remains this entry's
+      default; use INT8_DYNAMIC_CALIBRATED_THRESHOLD
+      (0.939693808555603, candidate_e.py) when scoring with the INT8
+      artifact instead.
+
+  spectra_aasist3_onnx_int8:
+    id: spectra_aasist3_onnx_int8
+    repository: lab260/Spectra-AASIST3
+    revision: bc0ded888080ddad493177bb53aa6f5b95219d7c
+    enabled: false
+    architecture: "Dynamic INT8 weight-quantized (onnxruntime.quantization.quantize_dynamic, MatMul-only, QInt8, per_channel=False) export of spectra_aasist3_onnx's FP32 ONNX graph. Same wav2vec2 XLS-R-300m + MLP bridge + KAN-AASIST architecture; 351 of 417 MatMul nodes converted to MatMulInteger, 66 MatMul + all 24 Conv nodes remain fp32."
+    base_model: facebook/wav2vec2-xls-r-300m
+    sample_rate: 16000
+    window_seconds: 4.0375
+    window_samples: 64600
+    checkpoint_filename: spectra-aasist3-int8-dynamic.onnx
+    checkpoint_size_bytes: 364036647
+    label_mapping:
+      0: spoof
+      1: bonafide
+    license: Apache-2.0
+    training_dataset: "Identical underlying weights to spectra_aasist3_onnx (see that entry) -- quantization is a post-hoc numerical transform of the same trained checkpoint, not a retraining."
+    source_repository: null
+    source_repository_status: "DERIVED ARTIFACT -- this INT8 file was generated locally by this project (scripts/run_spectra_int8_evaluation.py pipeline; quantize_dynamic call) from the verified FP32 checkpoint. It is NOT hosted anywhere on Hugging Face and is NOT committed to this git repository (>300MB, gitignored under models/cache/*). See docs/spectra_production_optimization.md Step 17 for the undecided production-distribution question (download-FP32-then-quantize-at-startup vs. publish-derived-artifact-to-HF vs. keep-FP32-only) -- no option was chosen or executed without explicit user instruction."
+    deployment_role: research_candidate_pending_distribution_decision
+    notes: >
+      PRODUCTION OPTIMIZATION sub-phase. SHA256 of the locally-generated
+      artifact: 444f832d306a2be4f823119f84e698e8821db6a1aab248593d4b05b7a9a48108.
+      Numerical parity vs FP32 (100-clip calibration-only subset, 50
+      bonafide + 50 spoof): mean absolute bona-fide-logit difference
+      0.149, median 0.078, max 1.17, Pearson r=0.999, Spearman
+      rho=0.998, 100% decision agreement at the FP32 threshold -- see
+      results/metrics/spectra_int8_parity.json. INT8-calibrated threshold
+      (derived from the SAME 200-clip calibration set used for FP32, EER
+      method): 0.939693808555603 -- see
+      results/metrics/spectra_int8_calibration.json. Frozen evaluation on
+      the SAME 200-clip evaluation set as FP32: accuracy 94.0%, bonafide
+      FPR 2.0%, spoof FNR 10.0%, F1 0.9375, ROC-AUC 0.9819, EER 3.0% -- all
+      Step-10 acceptance criteria met (see
+      results/metrics/spectra_int8_acceptance_criteria.json). Complete
+      Streamlit-stack process RSS after a real 30-second analysis:
+      ~821MB (vs FP32's ~1722MB and Sara's own ~900-1200MB baseline) --
+      see results/metrics/spectra_streamlit_process_simulation_int8.json.
+      This is the strongest evidence produced anywhere in this project
+      for a CPU-Streamlit-feasible generalization-focused detector.
+      NOT enabled pending an explicit production-artifact-distribution
+      decision (Step 17) -- committing the >300MB binary to git is
+      prohibited by project policy, and publishing a derived model to
+      Hugging Face requires explicit user instruction not yet given.
 
   hf_reference:
     id: hf_reference

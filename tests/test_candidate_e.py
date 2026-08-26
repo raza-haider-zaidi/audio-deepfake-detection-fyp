@@ -14,6 +14,8 @@ import pytest
 
 from audio_deepfake_detector.config.models_config import load_models_config
 from audio_deepfake_detector.models.candidate_e import (
+    FP32_CALIBRATED_THRESHOLD,
+    INT8_DYNAMIC_CALIBRATED_THRESHOLD,
     REQUIRED_SAMPLES,
     CandidateSpectraAasist3OnnxDetector,
     apply_preemphasis,
@@ -165,5 +167,49 @@ def test_load_and_predict_on_cpu_with_smoke_audio():
 
         full = detector.predict_full_clip(sample, aggregation="mean")
         assert full["n_windows"] >= 1
+    finally:
+        detector.unload()
+
+
+def test_default_threshold_is_fp32_calibrated_value():
+    detector = create_detector("spectra_aasist3_onnx", device="cpu")
+    assert detector.threshold == FP32_CALIBRATED_THRESHOLD
+
+
+def test_fp32_and_int8_calibrated_thresholds_are_distinct_and_frozen():
+    # Both values are frozen calibration results (results/metrics/spectra_aasist3_calibration.json,
+    # spectra_int8_calibration.json) -- this test guards against accidental edits drifting
+    # them apart from the documented, calibration-derived values.
+    assert FP32_CALIBRATED_THRESHOLD == 0.9299831390380859
+    assert INT8_DYNAMIC_CALIBRATED_THRESHOLD == 0.939693808555603
+    assert FP32_CALIBRATED_THRESHOLD != INT8_DYNAMIC_CALIBRATED_THRESHOLD
+
+
+def test_int8_model_config_is_disabled_and_documents_pending_distribution():
+    config = load_models_config().get("spectra_aasist3_onnx_int8")
+    assert config.enabled is False
+    assert config.checkpoint_filename == "spectra-aasist3-int8-dynamic.onnx"
+    assert config.checkpoint_size_bytes == 364036647
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+def test_load_accepts_local_onnx_path_override():
+    """The INT8 artifact is a local, gitignored file -- load() must support
+    pointing the SAME adapter class at it via local_onnx_path instead of
+    downloading checkpoint_filename from the Hub."""
+    import os
+
+    int8_path = os.path.join(
+        "models", "cache", "quantized", "spectra-aasist3-int8-dynamic.onnx"
+    )
+    if not os.path.exists(int8_path):
+        pytest.skip("INT8 artifact not present locally (generate via scripts/run_spectra_int8_evaluation.py's quantize_dynamic call first)")
+
+    detector = create_detector("spectra_aasist3_onnx_int8", device="cpu")
+    try:
+        metadata = detector.load(local_onnx_path=int8_path)
+        assert metadata.device == "cpu"
+        assert detector.model_info()["input_length_samples"] == REQUIRED_SAMPLES
     finally:
         detector.unload()
