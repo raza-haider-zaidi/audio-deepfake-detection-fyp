@@ -73,6 +73,12 @@ PREEMPHASIS_COEFF = 0.97
 REQUIRED_SAMPLES = 64600
 AUTHOR_DEFAULT_THRESHOLD = -1.0625009  # from model.py SpectraAASIST3.classify(), NOT independently calibrated by this project
 
+# Project-calibrated operating thresholds (spoof-probability convention, higher = spoof),
+# frozen on the calibration subset in results/metrics/spectra_aasist3_split.json (seed=2024),
+# NEVER selected on the evaluation set. See docs/spectra_production_optimization.md.
+FP32_CALIBRATED_THRESHOLD = 0.9299831390380859
+INT8_DYNAMIC_CALIBRATED_THRESHOLD = 0.939693808555603
+
 
 def apply_preemphasis(waveform: np.ndarray, coeff: float = PREEMPHASIS_COEFF) -> np.ndarray:
     """y[0] = x[0], y[n] = x[n] - coeff*x[n-1] for n >= 1.
@@ -153,19 +159,39 @@ class CandidateSpectraAasist3OnnxDetector(BaseDeepfakeDetector):
         self._output_name: str | None = None
         self._input_length: int | None = None
         self._label_mapping = model_config.label_mapping or {0: "spoof", 1: "bonafide"}
+        # Calibrated decision threshold (spoof-probability convention). Defaults to the
+        # FP32 calibration result; callers score with INT8_DYNAMIC_CALIBRATED_THRESHOLD
+        # explicitly when using the quantized artifact (see production adapter notes in
+        # docs/spectra_production_optimization.md -- there is currently no single
+        # "quantization" field on ModelConfig, so the caller is responsible for passing
+        # the threshold matching whichever artifact `local_onnx_path` points at).
+        self.threshold = FP32_CALIBRATED_THRESHOLD
 
-    def load(self) -> ModelLoadMetadata:
+    def load(self, local_onnx_path: str | None = None) -> ModelLoadMetadata:
+        """`local_onnx_path`: load a local ONNX file (e.g. a quantized
+        variant produced by scripts/run_spectra_int8_evaluation.py) instead
+        of downloading `checkpoint_filename` from the Hub. Used for the
+        INT8 production-optimization experiment (docs/spectra_production_optimization.md);
+        the INT8 artifact is not currently hosted anywhere and must not be
+        committed to this repository (see Step 17 of that document) -- this
+        parameter exists so the same adapter class can be pointed at it
+        locally without inventing a second adapter class."""
         import onnxruntime as ort
         import torch
-        from huggingface_hub import hf_hub_download
 
-        ckpt_path = hf_hub_download(
-            repo_id=self.repository,
-            filename=self.model_config.checkpoint_filename,
-            revision=self.model_config.revision,
-        )
+        if local_onnx_path is not None:
+            ckpt_path = local_onnx_path
+        else:
+            from huggingface_hub import hf_hub_download
+
+            ckpt_path = hf_hub_download(
+                repo_id=self.repository,
+                filename=self.model_config.checkpoint_filename,
+                revision=self.model_config.revision,
+            )
 
         session_options = ort.SessionOptions()
+        session_options.intra_op_num_threads = 2  # see docs/spectra_production_optimization.md Step 11
         self._session = ort.InferenceSession(
             ckpt_path, sess_options=session_options, providers=["CPUExecutionProvider"]
         )

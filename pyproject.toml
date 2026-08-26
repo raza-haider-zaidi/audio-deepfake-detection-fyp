@@ -53,6 +53,7 @@ calibration = [
 # experiment. onnxruntime (CPU build) only; never onnxruntime-gpu.
 onnx = [
     "onnxruntime>=1.20,<2",
+    "onnx>=1.17,<2",
 ]
 
 [tool.pytest.ini_options]
