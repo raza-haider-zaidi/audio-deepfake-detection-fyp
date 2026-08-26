@@ -15,6 +15,7 @@ _ADAPTER_FACTORIES: dict[str, str] = {
     "caa_wav2vec2": "audio_deepfake_detector.models.candidate_a:CandidateAWav2Vec2Detector",
     "sara_wav2vec2": "audio_deepfake_detector.models.candidate_b:CandidateBWav2Vec2Detector",
     "antideepfake_wav2vec2_small": "audio_deepfake_detector.models.candidate_c:CandidateAntiDeepfakeWav2Vec2Detector",
+    "antideepfake_wav2vec2_onnx": "audio_deepfake_detector.models.candidate_d:CandidateAntiDeepfakeOnnxDetector",
 }
 
 

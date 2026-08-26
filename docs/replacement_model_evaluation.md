@@ -329,13 +329,232 @@ entirely) in the next phase, and continue treating `sara_wav2vec2`'s
 Phase 4 Outcome C (with the inconclusive-zone recommendation) as the
 current best-evidence status of the deployed model.
 
-## 13. Reproducibility
+## 14. ONNX Rescue Investigation (Phase 5 continuation)
+
+Triggered by a follow-up user correction pointing at a community ONNX
+export of the same checkpoint, discovered after Section 5's fairseq
+blocker was documented. Investigated 2026-08-27.
+
+### 14.1 Why the fairseq path failed (recap)
+
+See Section 5. `fairseq.models.wav2vec.Wav2Vec2Model` is the only
+documented inference path for `antideepfake_wav2vec2_small`, and it does
+not install in this project's `.venv` (two independent, reproducible pip
+failures).
+
+### 14.2 Discovery and verification of the ONNX export
+
+The claimed mirror repository — `SpeechAntiSpoofingBenchmarks/Wav2Vec2-Small-AntiDeepfake`
+on Hugging Face — was **not** taken on faith. It was independently verified
+via direct HTTP calls (`curl` against the HF API and CDN resolve URLs), not
+via the `WebFetch` tool alone: `WebFetch` was observed to return confident,
+detailed, plausible-sounding narrative summaries for both a real API
+endpoint and a raw-file URL, without visibly distinguishing "real content"
+from "a summarized guess" — which is not trustworthy for verifying a
+load-bearing existence claim on its own. Direct API/curl calls confirmed:
+
+- **Repository**: `SpeechAntiSpoofingBenchmarks/Wav2Vec2-Small-AntiDeepfake`
+  — genuinely exists (HTTP 200), public, ungated.
+- **Resolved revision**: `85f8e14878533ed0c96c9bef119580ab4b5ef31f`
+- **Relationship to the original**: stated in its own README, and
+  corroborated independently, to be a **bit-exact copy** of
+  `nii-yamagishilab/wav2vec-small-anti-deepfake` — its `model.safetensors`
+  is exactly **380,210,632 bytes**, byte-for-byte identical to the size
+  already recorded for the original NII checkpoint in Section 3.
+- **Maintainer**: Kirill Borodin (`SpeechAntiSpoofingBenchmarks` org) — a
+  **third-party community benchmark maintainer, not the original NII
+  authors.** The license (CC BY-NC-SA 4.0) is stated to be inherited from
+  the source; attribution obligations from Section 4 still apply to the
+  original NII authors regardless of which mirror is used.
+- **ONNX artifact**: `wav2vec2-small-antideepfake.onnx`, **377,935,876
+  bytes**, SHA256 `36ecc56f1f4b1a230e657b14c2d67702b7b01a0d6cb66ac4601497f12c3803d3`
+  — confirmed identical between the HF API's reported hash and the hash of
+  the file actually downloaded into this project's cache.
+- **Export commit**: `51b0d36ae02dfae10b96856b2ea410e725a56042`
+  ("Add TensorRT export script + ONNX export"), matching the commit the
+  user referenced. The export script itself
+  (`trt_wav2vec2_small_antideepfake.py`) was downloaded and read directly
+  (565 lines, SHA256 recorded in `results/metrics/antideepfake_onnx_status.json`).
+
+### 14.3 ONNX Runtime CPU installation
+
+`onnxruntime>=1.20,<2` (CPU build) added as a new optional dependency group
+(`[project.optional-dependencies.onnx]` in `pyproject.toml`) and installed
+into the project `.venv`. Installed cleanly: `onnxruntime==1.29.0`.
+`onnxruntime-gpu`, CUDA, and TensorRT were **not** installed. Verified after
+install that the project's pinned CPU-only `torch`/`numpy` were untouched
+(`torch 2.13.0+cpu`, `torch.cuda.is_available() == False`,
+`numpy 2.5.2`) and that `onnxruntime.get_available_providers()` returns
+only `['AzureExecutionProvider', 'CPUExecutionProvider']` — no CUDA
+provider available in this environment.
+
+### 14.4 ONNX graph introspection (Step 5 — read from the graph, not guessed)
+
+```
+input:  "wav"    float32  [batch (dynamic), 64000]
+output: "logits" float32  [batch (dynamic), 2]
+```
+
+64,000 samples at 16 kHz = **exactly 4.0 seconds**, a **fixed** (not
+dynamic) time dimension. This is directly confirmed by the export script's
+own `torch.onnx.export(..., dynamic_axes={"wav": {0: "batch"}, "logits":
+{0: "batch"}})` call, which dynamic-izes only the batch axis. Notably, this
+window size is **identical** to `sara_wav2vec2`'s own
+`window_seconds: 4.0` / `window_samples: 64000` in `configs/models.yaml` —
+enabling a fair, apples-to-apples per-window CPU latency comparison
+(Section 14.6) without needing to trust any cross-model preprocessing
+assumption.
+
+### 14.5 Preprocessing reconstruction — UNRESOLVED, not guessed
+
+The ONNX graph exports **only the neural network**. The export script's own
+docstring states plainly that "all preprocessing already lives in the
+original `score_batch()`" — and that function is not part of this export.
+Tracing where it actually lives:
+
+- `trt_wav2vec2_small_antideepfake.py` imports it from an external
+  `wav2vec2_small_antideepfake` module (`ENTRY_MODULE`) exposing an
+  `AntiSpoofingModel`-family subclass with `.net`, `.load()`, and
+  `.score_batch(audios, srs)` methods. **This module is not a file in the
+  `SpeechAntiSpoofingBenchmarks/Wav2Vec2-Small-AntiDeepfake` HF repo.**
+- The natural next place to look — the Arena's own leaderboard application
+  (`SpeechAntiSpoofingBenchmarks/SpeechAntiSpoofingArena`, an HF Space) —
+  was checked directly via its API file listing. It contains **only** the
+  leaderboard web app (`app.py`, `badges.py`, `cache_store.py`,
+  `changelog.py`, `charts.py`, `dispatch_queue.py`, `docs_fetch.py`,
+  `events.py`, `ingest.py`, `leaderboard.py`, `main.py`, `ranking.py`,
+  `webhook.py`, `tests/`) — **no** scoring/preprocessing framework code, no
+  `wav2vec2_small_antideepfake.py`, no `score_batch`, no `AntiSpoofingModel`
+  class.
+- A general web search for the framework's own GitHub repository (if one
+  exists) returned no result.
+
+**Consequently, the following preprocessing details are genuinely
+unverifiable from any published source** (not merely inconvenient to find):
+the exact crop/pad strategy from arbitrary length to 64,000 samples;
+silence-pad vs. repeat/tile padding; crop position (left/right/center) for
+longer clips; the multi-window aggregation strategy used for clips longer
+than 4.0s; and whether the per-utterance `layer_norm` used by the original
+PyTorch model (Section 3) is still applied, and at what stage.
+
+**Per the project owner's explicit instruction** ("do not proceed to
+scientific evaluation using guessed preprocessing") **and CLAUDE.md's
+no-fabrication policy**, this is marked unresolved rather than guessed.
+`src/audio_deepfake_detector/models/candidate_d.py`
+(`CandidateAntiDeepfakeOnnxDetector`, model id
+`antideepfake_wav2vec2_onnx`, registered in `registry.py`, `enabled: false`
+in `configs/models.yaml`) reflects this precisely: `load()` genuinely
+succeeds — it downloads the ONNX file, opens a CPU-only
+`onnxruntime.InferenceSession`, and introspects the real input/output
+contract above. `predict()` **deliberately raises `RuntimeError`** rather
+than guessing the crop/pad/windowing logic and returning a plausible-
+looking but unverifiable detection result. A separate, explicitly
+non-scientific `run_raw_window()` method exists purely for CPU benchmarking
+and smoke-testing (Section 14.6/14.7), and is documented as carrying no
+accuracy meaning.
+
+This is a **different failure mode** than Section 5's: there, `load()`
+itself failed (a missing dependency). Here, `load()` and raw CPU inference
+genuinely work — the blocker is purely an unpublished preprocessing
+contract, one step later in the pipeline.
+
+### 14.6 CPU benchmark (Step 10, Step 18 — resource/latency only, no accuracy claim)
+
+Measured on this project's dev machine, CPU-only, deterministic synthetic
+smoke input (matches the existing `results/metrics/cpu_model_benchmark.json`
+convention). Full numbers: `results/metrics/antideepfake_onnx_status.json`.
+
+| Metric | `antideepfake_wav2vec2_onnx` | `sara_wav2vec2` (Phase 2/3) |
+|---|---|---|
+| Checkpoint size | 377,935,876 bytes | 491,044,441 bytes |
+| Cold load time | ~0.48s | 1.79s |
+| RAM increase on load | 394.3 MB | 801.9 MB |
+| RSS after load | 445.7 MB | 1,199.1 MB |
+| Native 4.0s-window inference (mean) | **334.5 ms** (threads=2) | **140.2 ms** |
+
+**Finding**: the ONNX candidate has a smaller checkpoint, ~3.7x faster
+cold load, and roughly half the resident memory of `sara_wav2vec2` — but is
+**~2.4x slower per identical 4.0-second window** on CPU inference on this
+machine. This is a genuine, measured, non-obvious tradeoff, reported as-is.
+It does not, on its own, decide deployment viability, and is moot pending
+Section 14.5 regardless.
+
+`intra_op_num_threads` comparison: `threads=1` mean 487.1 ms vs.
+`threads=2` mean 370.5 ms (~24% faster with 2 threads on this dev machine).
+Streamlit Community Cloud's actual CPU allocation was not confirmed, so
+this is a dev-machine-only data point, not a Streamlit Cloud measurement.
+
+A naive, explicitly non-scientific non-overlapping windowing scheme (used
+**only** as a CPU-cost proxy, not as verified preprocessing) estimates
+~1.1s / ~1.8s / ~3.1s total latency for 10s / 20s / 30s application-level
+clips respectively — see `results/metrics/antideepfake_onnx_status.json`
+for the full breakdown and its explicit non-scientific caveat.
+
+### 14.7 Basic inference validation (Step 9)
+
+Confirmed on deterministic smoke input: session loads with
+`providers == ['CPUExecutionProvider']` only (no CUDA); input tensor shape
+matches the graph exactly; output logits are finite; two consecutive calls
+on identical input produce bit-identical output (deterministic); no
+`fairseq` import occurs anywhere in this adapter. Per Step 9's own
+instruction, these smoke predictions have no scientific/accuracy meaning.
+
+### 14.8 Clean generalization evaluation, thresholds, robustness, Sara accuracy comparison — NOT EXECUTED
+
+Steps 11–16 of the phase instructions (In-the-Wild balanced subset
+sampling, calibration/evaluation split, threshold selection, EER/ROC-AUC/F1/
+bonafide-FPR measurement, MP3/telephone/noise robustness, and a same-clip
+accuracy comparison against `sara_wav2vec2`) were **not executed**, because
+all of them require `predict()` to produce a real, correctly-preprocessed
+detection result, which Section 14.5 establishes is currently blocked. No
+`mueller91`/`SpeechAntiSpoofingBenchmarks` In-the-Wild audio was
+downloaded in this sub-phase.
+
+### 14.9 Streamlit feasibility
+
+Same conclusion as Section 9, for a different reason: the deployment gate
+requires **both** generalization evidence and acceptable resource cost —
+generalization evidence cannot exist without a working `predict()`
+(Section 14.5), so the gate cannot pass regardless of the encouraging
+resource numbers in Section 14.6. Separately, and unlike the fairseq path,
+the ONNX + `onnxruntime` dependency chain **is** lightweight, pure-Python,
+CPU-wheel-installable, and carries none of `fairseq`'s Streamlit Cloud
+build-fragility risk (Section 9) — so *if* the preprocessing were ever
+independently reconstructed or obtained from the maintainer, this
+dependency chain would not need re-litigating.
+
+### 14.10 Final outcome for the ONNX investigation
+
+> **E. ONNX route cannot be reproduced because required preprocessing
+> remains unverifiable.**
+
+This is the honest fit: the ONNX artifact itself is genuine, verified, and
+runs correctly on CPU — the rescue attempt technically succeeded at
+avoiding `fairseq`. But it does not rescue the overall generalization
+evaluation, because the preprocessing needed to turn arbitrary real-world
+audio into a valid model input is not published anywhere findable, and this
+project will not guess it. **Outcome A is explicitly not chosen** for the
+same reason as Section 12: there is no working, verified `predict()` path
+to replace anything with.
+
+**Recommended next step, unchanged from Section 12**: prioritize a
+`transformers`-native or otherwise fully-source-available candidate next.
+If this specific ONNX export is revisited, the concrete blocking action is
+contacting the maintainer (`kborodin.research@gmail.com`, Telegram
+`@korallll_ai`, per the model card) to request the `score_batch()`/
+preprocessing source, rather than attempting to reverse-engineer it from
+the fixed input length alone.
+
+## 15. Reproducibility
 
 ```
 git checkout feat/generalization-model-eval
-.venv\Scripts\python.exe -m pytest -m "not integration and not slow"   # 96 passed
-.venv\Scripts\python.exe -m pytest -m integration tests\test_candidate_c.py  # confirms the fairseq ImportError
+.venv\Scripts\python.exe -m pytest -m "not integration and not slow"   # 103 passed
+.venv\Scripts\python.exe -m pytest -m integration                       # 4 passed
 ```
 
 No dataset audio or model weights are committed. `mueller91/In-The-Wild`
-was not downloaded in this phase (Section 6).
+was not downloaded in this phase (Section 6). The ONNX artifact
+(377,935,876 bytes) was downloaded into the project-controlled,
+gitignored `models/cache/` directory (Section 14.3–14.4) and is not
+committed.
