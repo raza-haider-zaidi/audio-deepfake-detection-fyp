@@ -46,6 +46,14 @@ calibration = [
     "pyarrow>=17.0",
     "scikit-learn>=1.5,<2",
 ]
+# CPU-only ONNX Runtime investigation (docs/replacement_model_evaluation.md,
+# "ONNX Rescue Investigation" section). NOT part of requirements.txt / the
+# Streamlit Community Cloud deployment unless the ONNX candidate is later
+# selected — this is a research-only dependency for the fairseq-avoidance
+# experiment. onnxruntime (CPU build) only; never onnxruntime-gpu.
+onnx = [
+    "onnxruntime>=1.20,<2",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

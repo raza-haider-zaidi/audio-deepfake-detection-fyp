@@ -134,6 +134,59 @@ models:
       Linux build environment) or a verified transformers-native port
       appears. See docs/replacement_model_evaluation.md for full analysis.
 
+  antideepfake_wav2vec2_onnx:
+    id: antideepfake_wav2vec2_onnx
+    repository: SpeechAntiSpoofingBenchmarks/Wav2Vec2-Small-AntiDeepfake
+    revision: 85f8e14878533ed0c96c9bef119580ab4b5ef31f
+    enabled: false
+    architecture: "ONNX export (opset 17) of the same wav2vec 2.0 Base + AdaptiveAvgPool1d + Linear(768,2) checkpoint as antideepfake_wav2vec2_small, exported by a third-party community benchmark maintainer (Speech Anti-Spoofing Arena), not the original NII authors. Graph input 'wav' float32 [batch,64000], output 'logits' float32 [batch,2] -- read directly from the ONNX graph via onnxruntime, not guessed. 64000 samples @ 16kHz = 4.0s, identical window size to sara_wav2vec2."
+    base_model: nii-yamagishilab/wav2vec-small-anti-deepfake
+    sample_rate: 16000
+    window_seconds: 4.0
+    window_samples: 64000
+    checkpoint_filename: wav2vec2-small-antideepfake.onnx
+    checkpoint_size_bytes: 377935876
+    label_mapping:
+      0: spoof
+      1: bonafide
+    license: CC-BY-NC-SA-4.0
+    training_dataset: "Same checkpoint as antideepfake_wav2vec2_small (see that entry); this is a bit-exact copy per the mirror's own README and the identical model.safetensors byte size (380210632)."
+    source_repository: https://github.com/nii-yamagishilab/AntiDeepfake
+    source_repository_status: "VERIFIED (HTTP 200 via direct API/curl, not WebFetch summarization) -- HF repo SpeechAntiSpoofingBenchmarks/Wav2Vec2-Small-AntiDeepfake confirmed real: API metadata, README.md, config.json, and the ONNX/TensorRT export script (trt_wav2vec2_small_antideepfake.py, commit 51b0d36ae02dfae10b96856b2ea410e725a56042) all fetched and inspected directly. ONNX file SHA256 36ecc56f1f4b1a230e657b14c2d67702b7b01a0d6cb66ac4601497f12c3803d3 (verified: matches HF API paths-info AND the locally downloaded file)."
+    deployment_role: research_candidate_blocked_preprocessing
+    notes: >
+      PHASE 5 continuation ("ONNX Rescue Investigation", triggered by a user
+      correction pointing at this mirror after antideepfake_wav2vec2_small
+      was found fairseq-blocked). Unlike that model, the ONNX graph LOADS
+      and RUNS on CPU here (onnxruntime 1.29.0, CPUExecutionProvider only,
+      verified 2026-08-27) -- see results/metrics/antideepfake_onnx_status.json
+      for the full CPU benchmark (cold load time, RSS, per-window latency at
+      intra_op_num_threads=1 and 2, smoke-input determinism check).
+      BLOCKED at a different step: the ONNX graph only contains the neural
+      network; the crop/pad-to-64000-samples preprocessing that the mirror's
+      own export script says "already lives in the original score_batch()"
+      is not published anywhere. The export script
+      (trt_wav2vec2_small_antideepfake.py) imports that function from an
+      external `wav2vec2_small_antideepfake` module that is not a file in
+      this HF repo, and the Arena's own application source (HF Space
+      SpeechAntiSpoofingBenchmarks/SpeechAntiSpoofingArena, file listing
+      fetched directly via the HF API) contains only the leaderboard web
+      app -- no scoring/preprocessing framework code. No GitHub repository
+      for this framework could be found by search. Per the project owner's
+      explicit instruction ("do not proceed to scientific evaluation using
+      guessed preprocessing") and CLAUDE.md's no-fabrication policy, this
+      adapter's predict() deliberately raises RuntimeError rather than
+      guessing the crop/pad/windowing strategy and producing a plausible-
+      looking but unverifiable detection result. Consequently no accuracy,
+      EER, ROC-AUC, threshold, robustness, or Sara accuracy-comparison
+      numbers exist for this model -- only CPU resource-benchmark numbers,
+      which do not require correct preprocessing. Label mapping (0=spoof,
+      1=bonafide) is ASSUMED consistent with the original checkpoint's
+      verified mapping, not independently re-verified against this ONNX
+      export's own outputs (doing so would require the same blocked
+      preprocessing). See docs/replacement_model_evaluation.md, "ONNX
+      Rescue Investigation" section, for the full evidence trail.
+
   hf_reference:
     id: hf_reference
     repository: mo-thecreator/Deepfake-audio-detection
