@@ -187,6 +187,62 @@ models:
       preprocessing). See docs/replacement_model_evaluation.md, "ONNX
       Rescue Investigation" section, for the full evidence trail.
 
+  spectra_aasist3_onnx:
+    id: spectra_aasist3_onnx
+    repository: lab260/Spectra-AASIST3
+    revision: bc0ded888080ddad493177bb53aa6f5b95219d7c
+    enabled: false
+    architecture: "wav2vec 2.0 XLS-R-300m front-end (standard transformers Wav2Vec2Model, not fairseq) + single-layer MLP bridge (Linear 1024->128) + KAN-enhanced AASIST back-end (RawNet2-style residual encoder, spectral/temporal graph-attention branches, Kolmogorov-Arnold output layer). Verified directly from the model's own vendored, self-contained model.py -- no external framework dependency. ONNX graph input 'wav' float32 [batch,64600], output 'logits' float32 [batch,2], read directly via onnxruntime."
+    base_model: facebook/wav2vec2-xls-r-300m
+    sample_rate: 16000
+    window_seconds: 4.0375
+    window_samples: 64600
+    checkpoint_filename: spectra-aasist3.onnx
+    checkpoint_size_bytes: 1279022864
+    label_mapping:
+      0: spoof
+      1: bonafide
+    license: Apache-2.0
+    training_dataset: "Not documented on the model card beyond the Arena's per-dataset evaluation table (ASVspoof2019_LA listed as an 'in-domain family' eval, implying it or a closely related set was used in training/post-training -- not confirmed either way from the card). No training-data table equivalent to antideepfake_wav2vec2_small's arXiv Table I was found for this pre-release model."
+    source_repository: null
+    source_repository_status: "PRE-RELEASE / UNPUBLISHED model -- no associated paper or public GitHub repository found. Appears in the Speech Anti-Spoofing Arena's Unpublished/Proprietary tier (listed, unranked). Same maintainer (Kirill Borodin, SpeechAntiSpoofingBenchmarks-affiliated) as antideepfake_wav2vec2_onnx and the earlier AntiDeepfake ONNX mirror -- verified directly via HF API/curl, not WebFetch summarization."
+    deployment_role: research_candidate_resource_and_academic_caveats
+    notes: >
+      PHASE 5 continuation. Unlike antideepfake_wav2vec2_onnx (candidate_d),
+      this model's crop/pad preprocessing IS documented in prose on its own
+      model card README (preemphasis coefficient 0.97 applied to the full
+      waveform, then a deterministic first-64,600-sample window with
+      tile-repeat padding for shorter clips) even though the runnable
+      wrapper file the README itself links to (spectra_aasist3.py,
+      spectra_aasist3_net.py) does not exist in this repository (both
+      confirmed HTTP 404) -- only the vendored network (model.py) is
+      present. This adapter (candidate_e.py,
+      CandidateSpectraAasist3OnnxDetector) therefore implements predict(),
+      unlike candidate_d.py. One convention (pre-emphasis first-sample
+      edge handling) is not explicitly spelled out in the README and is
+      implemented per the universal DSP default (y[0]=x[0]), documented as
+      an assumption, not a guess about the whole preprocessing pipeline.
+      Score direction (index 1 = bona-fide logit, higher = more bona
+      fide) is verified directly from model.py's own classify() method
+      (thresholds index 1 against a baked-in default of -1.0625009), not
+      just README prose.
+      RESOURCE GATE (measured 2026-08-27, this project's dev machine, CPU
+      onnxruntime 1.29.0): checkpoint 1,279,022,864 bytes (~1.28GB, ~3.4x
+      Sara's checkpoint); cold load ~12.5s (~7x slower than Sara's 1.79s);
+      peak process RSS ~1.66GB (vs Sara's measured ~1.2GB full-app
+      figure); per-window (4.04s) CPU inference ~1.04s at
+      intra_op_num_threads=2 (~7.4x slower than Sara's 140ms for the same
+      window length). This does not trigger the project's hard 2.5GB
+      resource-gate stop, but is a serious, independently-measured
+      Streamlit deployment concern regardless of downstream accuracy
+      results -- see results/metrics/spectra_aasist3_resource_gate.json
+      and docs/spectra_aasist3_evaluation.md for the full breakdown and
+      final decision.
+      This is a PRE-RELEASE/UNPUBLISHED model (no peer-reviewed paper);
+      author/Arena-reported EER numbers (e.g. InTheWild 1.20%) are
+      maintainer-reported only and are never presented as this project's
+      own measured results anywhere in this codebase.
+
   hf_reference:
     id: hf_reference
     repository: mo-thecreator/Deepfake-audio-detection
