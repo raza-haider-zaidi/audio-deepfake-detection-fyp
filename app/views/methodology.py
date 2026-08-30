@@ -5,22 +5,9 @@ presentation/aggregation logic, and what is scientific evaluation logic.
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import streamlit as st
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
-from app.components import render_section_title, setup_page, step_flow_html  # noqa: E402
-
-setup_page("Methodology")
-
-st.markdown('<div class="adf-headline" style="font-size:1.7rem;">Methodology</div>', unsafe_allow_html=True)
-st.markdown(
-    '<div class="adf-subtext">The implemented analysis pipeline, from upload to presented result.</div>',
-    unsafe_allow_html=True,
-)
+from app.components import render_section_title, step_flow_html
 
 PIPELINE_STEPS = [
     ("01", "Upload", "The uploaded file is validated (format, size, duration) and decoded."),
@@ -33,27 +20,36 @@ PIPELINE_STEPS = [
     ("08", "Present", "The binary decision and score are mapped to Bonafide / Spoof / Inconclusive for display."),
 ]
 
-st.markdown(step_flow_html(PIPELINE_STEPS), unsafe_allow_html=True)
+PIPELINE_TAGS = ["project", "project", "native", "project", "native", "project", "project", "presentation"]
 
-render_section_title("What is model-native vs. project-implemented")
-st.markdown(
-    """
+
+def render() -> None:
+    render_section_title(
+        "Methodology",
+        "The implemented analysis pipeline, from upload to presented result.",
+    )
+
+    st.markdown(step_flow_html(PIPELINE_STEPS, tags=PIPELINE_TAGS), unsafe_allow_html=True)
+
+    render_section_title("What is model-native vs. project-implemented")
+    st.markdown(
+        """
 | Stage | Origin |
 |---|---|
 | Pre-emphasis (0.97), 64,600-sample native input | Documented by the model's own source/card |
 | Decoding, resampling, validation | This project's presentation layer |
-| Multi-segment evidence (Segment Evidence page) | **This project's own application-level extension** — not part of the model authors' methodology |
+| Multi-segment evidence (Segment Evidence) | **This project's own application-level extension** — not part of the model authors' methodology |
 | Calibrated spoof-probability threshold | This project's own calibration experiment, run on a held-out calibration set |
 | Bonafide / Spoof / Inconclusive presentation states | This project's own presentation logic, layered on top of a frozen binary decision |
 | Audio quality diagnostics, suitability rating | This project's own descriptive signal-processing calculations — never fed back into the classifier |
 """
-)
+    )
 
-render_section_title("Scientific evaluation vs. presentation logic")
-st.markdown(
-    "The Evaluation page's metrics (EER, ROC-AUC, F1, bonafide FPR) were computed using the "
-    "SAME binary decision rule described above, on a held-out evaluation set never used to "
-    "select the threshold. The Inconclusive presentation state is a supplementary display "
-    "concept and was **not** part of that scientific evaluation — see the Evaluation page for "
-    "the exact binary-decision metrics."
-)
+    render_section_title("Scientific evaluation vs. presentation logic")
+    st.markdown(
+        "The Evaluation page's metrics (EER, ROC-AUC, F1, bonafide FPR) were computed using the "
+        "SAME binary decision rule described above, on a held-out evaluation set never used to "
+        "select the threshold. The Inconclusive presentation state is a supplementary display "
+        "concept and was **not** part of that scientific evaluation — see the Evaluation page for "
+        "the exact binary-decision metrics."
+    )

@@ -23,10 +23,12 @@ MEL_N_MELS = 80
 # Plot theme matching app/styles.py's dark surface tokens, so charts sit
 # visually flush with the surrounding card rather than showing as a bright
 # white rectangle in an otherwise dark interface.
-PLOT_BG = "#131922"
-PLOT_GRID = "#232c3a"
-PLOT_TEXT = "#8b96a8"
-PLOT_LINE = "#4f8ff7"
+PLOT_BG = "#FFFFFF"
+PLOT_GRID = "#DEE3EE"
+PLOT_TEXT = "#4A5578"
+PLOT_LINE = "#4568F2"
+PLOT_LINE_SECONDARY = "#0EA5B7"
+PLOT_WARNING = "#C88A1C"
 
 # Cap the number of points actually drawn for the waveform so a 30-second
 # clip at 16 kHz (480,000 samples) doesn't create unnecessary UI/memory
@@ -72,7 +74,8 @@ def plot_segment_timeline(segment_spoof_probs: list[float], segment_duration_sec
     ax = fig.add_subplot(111)
     ax.set_facecolor(PLOT_BG)
     ax.plot(x, segment_spoof_probs, marker="o", markersize=4, linewidth=1.2, color=PLOT_LINE)
-    ax.axhline(threshold, color="#e0ad4f", linewidth=1.0, linestyle="--", label="Calibrated spoof threshold")
+    ax.axhline(threshold, color=PLOT_WARNING, linewidth=1.2, linestyle="--", label="Calibrated spoof threshold")
+    ax.axhline(0.5, color=PLOT_LINE_SECONDARY, linewidth=1.0, linestyle=":", label="0.5 softmax direction", alpha=0.8)
     ax.set_ylim(-0.05, 1.05)
     ax.set_xlabel("Time (s)", color=PLOT_TEXT, fontsize=9)
     ax.set_ylabel("Spoof probability", color=PLOT_TEXT, fontsize=9)
@@ -120,5 +123,50 @@ def plot_mel_spectrogram(waveform: np.ndarray, sample_rate: int) -> matplotlib.f
         spine.set_color(PLOT_GRID)
     cbar = fig.colorbar(img, ax=ax, format="%+2.0f dB")
     cbar.ax.tick_params(colors=PLOT_TEXT, labelsize=8)
+    fig.tight_layout()
+    return fig
+
+
+def _style_axes(ax) -> None:
+    ax.set_facecolor(PLOT_BG)
+    ax.tick_params(colors=PLOT_TEXT, labelsize=8)
+    ax.grid(True, color=PLOT_GRID, linewidth=0.6, alpha=0.8)
+    for spine in ax.spines.values():
+        spine.set_color(PLOT_GRID)
+
+
+def plot_threshold_curve(thresholds: list[float], fprs: list[float], fnrs: list[float], current_threshold: float) -> matplotlib.figure.Figure:
+    """Research-only threshold explorer chart: FPR/FNR vs. a swept
+    threshold, with the current PRODUCTION threshold marked -- never the
+    other way around (production is never changed by this chart)."""
+    fig = matplotlib.figure.Figure(figsize=(7.5, 3.0), facecolor=PLOT_BG)
+    ax = fig.add_subplot(111)
+    _style_axes(ax)
+    ax.plot(thresholds, fprs, color=PLOT_LINE, linewidth=1.6, label="Bonafide FPR")
+    ax.plot(thresholds, fnrs, color=PLOT_LINE_SECONDARY, linewidth=1.6, label="Spoof FNR")
+    ax.axvline(current_threshold, color=PLOT_WARNING, linewidth=1.2, linestyle="--", label="Production threshold")
+    ax.set_xlabel("Hypothetical threshold (spoof probability)", color=PLOT_TEXT, fontsize=9)
+    ax.set_ylabel("Rate", color=PLOT_TEXT, fontsize=9)
+    legend = ax.legend(loc="upper center", fontsize=7, facecolor=PLOT_BG, edgecolor=PLOT_GRID)
+    for text in legend.get_texts():
+        text.set_color(PLOT_TEXT)
+    fig.tight_layout()
+    return fig
+
+
+def plot_robustness_comparison(labels: list[str], spoof_probs: list[float], threshold: float) -> matplotlib.figure.Figure:
+    """Bar chart of spoof probability per robustness condition, with the
+    production threshold as a reference line."""
+    fig = matplotlib.figure.Figure(figsize=(8.0, 3.0), facecolor=PLOT_BG)
+    ax = fig.add_subplot(111)
+    _style_axes(ax)
+    colors = [PLOT_WARNING if p >= threshold else PLOT_LINE_SECONDARY for p in spoof_probs]
+    ax.bar(labels, [p * 100 for p in spoof_probs], color=colors)
+    ax.axhline(threshold * 100, color=PLOT_LINE, linewidth=1.2, linestyle="--", label="Calibrated spoof threshold")
+    ax.set_ylabel("Spoof probability (%)", color=PLOT_TEXT, fontsize=9)
+    ax.tick_params(axis="x", labelrotation=20)
+    legend = ax.legend(loc="upper right", fontsize=7, facecolor=PLOT_BG, edgecolor=PLOT_GRID)
+    for text in legend.get_texts():
+        text.set_color(PLOT_TEXT)
     fig.tight_layout()
     return fig

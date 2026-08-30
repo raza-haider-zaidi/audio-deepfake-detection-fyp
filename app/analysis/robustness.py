@@ -105,6 +105,7 @@ class RobustnessResult:
     spoof_probability: float
     presentation_state: str
     delta_pp_from_original: float | None  # percentage points vs. the "original" row
+    processing_time_ms: float = 0.0
 
 
 def ffmpeg_available() -> str | None:
@@ -119,22 +120,32 @@ def run_robustness_analysis(
     audio_sample: AudioSample,
     threshold: float,
     conditions: tuple[str, ...] = CONDITIONS,
+    on_condition_start=None,
 ) -> list[RobustnessResult]:
     """Runs `conditions` SEQUENTIALLY against the already-loaded/cached
     `detector`. Each degraded waveform lives only in memory / a
     TemporaryDirectory for the duration of one condition's MP3 round-trip,
     and is discarded immediately after scoring. Presentation state uses
     the SAME frozen `presentation_state()` rule as production -- this
-    function never alters the classifier or its threshold."""
+    function never alters the classifier or its threshold.
+
+    `on_condition_start(condition_key, label)`, if given, is called before
+    each condition begins -- used by the UI to show a real ("Testing MP3
+    128 kbps...") status, never a fabricated progress percentage."""
     from audio_deepfake_detector.models.candidate_e import presentation_state as compute_presentation_state
 
     ffmpeg = ffmpeg_available()
     results: list[RobustnessResult] = []
     original_spoof_prob: float | None = None
 
+    import time
+
     for condition in conditions:
         if condition in ("mp3_128k", "mp3_64k") and ffmpeg is None:
             continue  # skip gracefully rather than fabricate a result
+        if on_condition_start is not None:
+            on_condition_start(condition, CONDITION_LABELS[condition])
+        t0 = time.perf_counter()
         degraded_waveform = make_condition_waveform(condition, audio_sample.waveform, audio_sample.sample_rate, ffmpeg or "")
         degraded_sample = AudioSample(
             waveform=degraded_waveform,
@@ -143,6 +154,7 @@ def run_robustness_analysis(
             source_name=f"{audio_sample.source_name}::{condition}",
         )
         prediction = detector.predict(degraded_sample)
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
         spoof_prob = prediction.probabilities["spoof"]
         if condition == "original":
             original_spoof_prob = spoof_prob
@@ -154,6 +166,7 @@ def run_robustness_analysis(
                 spoof_probability=spoof_prob,
                 presentation_state=compute_presentation_state(spoof_prob, threshold),
                 delta_pp_from_original=delta,
+                processing_time_ms=elapsed_ms,
             )
         )
         del degraded_waveform, degraded_sample  # release before the next condition

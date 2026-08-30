@@ -4,10 +4,12 @@ Pure HTML/data-building functions (no `streamlit` import, trivially unit
 testable) are kept separate from the small number of functions that
 actually call `st.*` to render them. This keeps app/components.py the
 single place that assembles markup, while streamlit_app.py stays a thin
-page-flow orchestrator.
+navigation router and app/views/*.py stay thin page-flow orchestrators.
 """
 
 from __future__ import annotations
+
+import html as _html
 
 from app.styles import STATE_TOKENS
 
@@ -17,7 +19,7 @@ from app.styles import STATE_TOKENS
 # ---------------------------------------------------------------------------
 
 
-def brand_mark_svg(size: int = 26, color: str = "#4f8ff7") -> str:
+def brand_mark_svg(size: int = 26, color: str = "#4568F2") -> str:
     """A minimal abstract waveform mark: five bars of varying height,
     evoking an audio signal without any figurative (brain/robot/shield)
     imagery."""
@@ -39,19 +41,42 @@ def brand_mark_svg(size: int = 26, color: str = "#4f8ff7") -> str:
     )
 
 
+def hero_signal_svg(width: int = 220, height: int = 140) -> str:
+    """A larger abstract multi-bar signal visualization for the hero
+    section -- CSS/SVG only, no stock imagery, no figurative icons."""
+    import math
+
+    bars = []
+    n = 24
+    bar_w = width / (n * 1.6)
+    gap = bar_w * 0.6
+    for i in range(n):
+        h = height * (0.25 + 0.55 * abs(math.sin(i * 0.45)) * (0.6 + 0.4 * math.cos(i * 0.2)))
+        x = i * (bar_w + gap)
+        y = (height - h) / 2
+        opacity = 0.35 + 0.65 * (i / n)
+        bars.append(f'<rect x="{x:.1f}" y="{y:.1f}" width="{bar_w:.1f}" height="{h:.1f}" rx="{bar_w/2:.1f}" fill="url(#adfHeroGrad)" opacity="{opacity:.2f}"/>')
+    return (
+        f'<svg width="100%" viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg" '
+        'role="img" aria-label="Abstract audio signal visualization">'
+        '<defs><linearGradient id="adfHeroGrad" x1="0" y1="0" x2="1" y2="1">'
+        '<stop offset="0%" stop-color="#4568F2"/><stop offset="100%" stop-color="#7C6CF2"/>'
+        "</linearGradient></defs>"
+        f"{''.join(bars)}</svg>"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Pure markup builders (testable without a Streamlit runtime).
 # ---------------------------------------------------------------------------
 
 
 def probability_bar_html(label: str, value: float, color: str) -> str:
-    """One labeled horizontal probability bar. `value` is 0-1."""
     pct = max(0.0, min(1.0, value)) * 100
     return (
         '<div class="adf-prob-row">'
         f'<span class="adf-prob-label">{label}</span>'
-        '<div class="adf-prob-track" role="img" '
-        f'aria-label="{label} probability {pct:.1f} percent">'
+        f'<div class="adf-prob-track" role="img" aria-label="{label} probability {pct:.1f} percent">'
         f'<div class="adf-prob-fill" style="width:{pct:.1f}%;background:{color};"></div>'
         "</div>"
         f'<span class="adf-prob-value">{pct:.1f}%</span>'
@@ -68,8 +93,6 @@ def probability_comparison_html(bonafide_prob: float, spoof_prob: float) -> str:
 
 
 def threshold_visualization_html(observed_spoof_prob: float, threshold: float) -> str:
-    """A single rail: filled up to the observed spoof probability, with a
-    marker at the calibrated threshold. Only used for INCONCLUSIVE."""
     observed_pct = max(0.0, min(1.0, observed_spoof_prob)) * 100
     threshold_pct = max(0.0, min(1.0, threshold)) * 100
     return (
@@ -84,20 +107,22 @@ def threshold_visualization_html(observed_spoof_prob: float, threshold: float) -
 
 
 def result_panel_html(state: str, title: str, explanation: str, extra_html: str = "") -> str:
-    """The single result panel. `state` must be one of STATE_TOKENS' keys."""
     tokens = STATE_TOKENS.get(state, STATE_TOKENS["INCONCLUSIVE"])
-    eyebrow = "ANALYSIS RESULT"
-    style_vars = (
-        f"--adf-state-fg:{tokens['fg']};--adf-state-bg:{tokens['bg']};--adf-state-border:{tokens['border']};"
-    )
+    style_vars = f"--adf-state-fg:{tokens['fg']};--adf-state-bg:{tokens['bg']};--adf-state-border:{tokens['border']};"
     return (
         f'<div class="adf-result" style="{style_vars}">'
-        f'<div class="adf-result-eyebrow">{eyebrow}</div>'
+        '<div class="adf-result-eyebrow">ANALYSIS RESULT</div>'
         f'<div class="adf-result-title">{title}</div>'
         f'<div class="adf-result-explain">{explanation}</div>'
         f"{extra_html}"
         "</div>"
     )
+
+
+def status_badge_html(state: str, label: str) -> str:
+    tokens = STATE_TOKENS.get(state, STATE_TOKENS["INCONCLUSIVE"])
+    style_vars = f"--adf-state-fg:{tokens['fg']};--adf-state-bg:{tokens['bg']};--adf-state-border:{tokens['border']};"
+    return f'<span class="adf-status-badge" style="{style_vars}">{_html.escape(label)}</span>'
 
 
 def metrics_row_html(items: list[tuple[str, str]]) -> str:
@@ -109,17 +134,59 @@ def metrics_row_html(items: list[tuple[str, str]]) -> str:
     return f'<div class="adf-metrics-row">{cells}</div>'
 
 
-def step_flow_html(steps: list[tuple[str, str, str]]) -> str:
-    """steps: list of (number, title, body)."""
-    cards = "".join(
-        '<div class="adf-step">'
-        f'<div class="adf-step-number">{n}</div>'
-        f'<div class="adf-step-title">{title}</div>'
-        f'<div class="adf-step-body">{body}</div>'
-        "</div>"
-        for n, title, body in steps
+def metric_card_html(value: str, label: str) -> str:
+    return f'<div class="adf-metric-card"><div class="value">{_html.escape(str(value))}</div><div class="label">{_html.escape(label)}</div></div>'
+
+
+def feature_card_html(number: str, title: str, body: str, url_path: str | None = None) -> str:
+    tag = "a" if url_path else "div"
+    href = f' href="{url_path}"' if url_path else ""
+    return (
+        f'<{tag} class="adf-feature-card"{href}>'
+        f'<div class="adf-feature-number">{number}</div>'
+        f'<div class="adf-feature-title">{_html.escape(title)}</div>'
+        f'<div class="adf-feature-body">{_html.escape(body)}</div>'
+        f"</{tag}>"
     )
-    return f'<div class="adf-steps">{cards}</div>'
+
+
+def feature_grid_html(cards: list[tuple[str, str, str, str | None]]) -> str:
+    return '<div class="adf-feature-grid">' + "".join(feature_card_html(*c) for c in cards) + "</div>"
+
+
+def step_flow_html(steps: list[tuple[str, str, str]], tags: list[str] | None = None) -> str:
+    """steps: list of (number, title, body). `tags`, if given, is a
+    parallel list of "native" | "project" | "presentation" for the
+    model-native vs. project-implemented vs. presentation-logic legend."""
+    cards = []
+    for i, (n, title, body) in enumerate(steps):
+        tag_html = ""
+        if tags and i < len(tags):
+            tag = tags[i]
+            tag_label = {"native": "Model-native", "project": "Project-implemented", "presentation": "Presentation logic"}.get(tag, tag)
+            tag_html = f'<span class="adf-step-tag adf-step-tag--{tag}">{tag_label}</span>'
+        cards.append(
+            '<div class="adf-step">'
+            f'<div class="adf-step-number">{n}</div>'
+            f'<div class="adf-step-title">{title}</div>'
+            f'<div class="adf-step-body">{body}</div>'
+            f"{tag_html}"
+            "</div>"
+        )
+    return f'<div class="adf-steps">{"".join(cards)}</div>'
+
+
+def info_callout_html(text: str) -> str:
+    return f'<div class="adf-callout">{text}</div>'
+
+
+def empty_state_html(title: str, body: str) -> str:
+    return (
+        '<div class="adf-empty-state">'
+        f'<div class="adf-section-title">{_html.escape(title)}</div>'
+        f'<div class="adf-section-sub">{body}</div>'
+        "</div>"
+    )
 
 
 HOW_IT_WORKS_STEPS = [
@@ -136,6 +203,24 @@ WHY_MODEL_POINTS = [
     "Runs without a dedicated GPU, on Streamlit Community Cloud's standard CPU allocation.",
 ]
 
+CAPABILITY_STRIP = [
+    "Audio Analysis",
+    "Segment Evidence",
+    "Audio Diagnostics",
+    "Robustness Testing",
+    "Research Evaluation",
+    "Exportable Reports",
+]
+
+PLATFORM_FEATURE_CARDS = [
+    ("01", "Audio Analysis", "Classify uploaded speech using the deployed Spectra detector.", "analyze"),
+    ("02", "Segment Evidence", "Inspect how spoof scores vary across the recording.", "analyze"),
+    ("03", "Audio Diagnostics", "Review codec, signal and recording-condition information.", "analyze"),
+    ("04", "Robustness Analysis", "Test prediction stability under controlled degradation.", "robustness"),
+    ("05", "Research Evaluation", "Inspect project-measured performance and model comparisons.", "evaluation"),
+    ("06", "Analysis Reports", "Export reproducible technical analysis summaries.", "analyze"),
+]
+
 
 # ---------------------------------------------------------------------------
 # Streamlit-rendering wrappers (thin -- all real markup logic lives above).
@@ -146,9 +231,9 @@ def render_page_header() -> None:
     import streamlit as st
 
     st.markdown(
-        f'<div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:1.25rem;">'
+        '<div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:0.75rem;">'
         f"{brand_mark_svg()}"
-        '<span class="adf-eyebrow" style="margin:0;">AI Voice Analysis</span>'
+        '<span style="font-weight:750;font-size:1.05rem;color:#1B2440;">Voice Analysis</span>'
         '<span class="adf-badge" style="margin-left:auto;">'
         '<span class="adf-badge-dot"></span>Research Prototype</span>'
         "</div>",
@@ -156,36 +241,48 @@ def render_page_header() -> None:
     )
 
 
-def setup_page(page_title: str) -> None:
-    """Shared boilerplate for every page/ file: page config, global styles,
-    and the header. Call once at the top of each page module."""
-    import streamlit as st
-
-    from app.styles import inject_global_styles
-
-    st.set_page_config(page_title=f"{page_title} — AI Voice Analysis", layout="wide")
-    st.markdown(inject_global_styles(), unsafe_allow_html=True)
-    render_page_header()
-
-
 def render_hero() -> None:
     import streamlit as st
 
-    st.markdown(
-        '<div class="adf-headline">Detect AI-generated<br/>and cloned speech.</div>'
-        '<div class="adf-subtext">Analyze speech using a CPU-deployed anti-spoofing model designed to '
-        "identify characteristics associated with synthetic or manipulated voices.</div>",
-        unsafe_allow_html=True,
-    )
+    col1, col2 = st.columns([3, 2])
+    with col1:
+        st.markdown(
+            '<div class="adf-eyebrow">Audio Deepfake Analysis</div>'
+            '<div class="adf-headline">Detect synthetic and cloned speech <span class="accent">with evidence you can inspect</span>.</div>'
+            '<div class="adf-subtext">Analyze voice recordings using a CPU-deployed anti-spoofing system, inspect '
+            "segment-level evidence, evaluate recording conditions, and explore the project's measured research "
+            "performance.</div>",
+            unsafe_allow_html=True,
+        )
+    with col2:
+        st.markdown(
+            f'<div style="padding-top:1rem;">{hero_signal_svg()}</div>',
+            unsafe_allow_html=True,
+        )
+
+
+def render_capability_strip() -> None:
+    import streamlit as st
+
+    cols = st.columns(len(CAPABILITY_STRIP))
+    for col, label in zip(cols, CAPABILITY_STRIP):
+        col.markdown(f'<div class="adf-badge" style="justify-content:center;width:100%;">{label}</div>', unsafe_allow_html=True)
+
+
+def render_feature_grid() -> None:
+    import streamlit as st
+
+    render_section_title("Platform capabilities")
+    st.markdown(feature_grid_html(PLATFORM_FEATURE_CARDS), unsafe_allow_html=True)
 
 
 def render_section_title(title: str, subtitle: str | None = None) -> None:
     import streamlit as st
 
-    html = f'<div class="adf-section-title">{title}</div>'
+    markup = f'<div class="adf-section-title">{title}</div>'
     if subtitle:
-        html += f'<div class="adf-section-sub">{subtitle}</div>'
-    st.markdown(html, unsafe_allow_html=True)
+        markup += f'<div class="adf-section-sub">{subtitle}</div>'
+    st.markdown(markup, unsafe_allow_html=True)
 
 
 def render_result_panel(state: str, title: str, explanation: str, extra_html: str = "") -> None:
@@ -204,6 +301,40 @@ def render_metrics_row(items: list[tuple[str, str]]) -> None:
     import streamlit as st
 
     st.markdown(metrics_row_html(items), unsafe_allow_html=True)
+
+
+def render_metric_cards(items: list[tuple[str, str]]) -> None:
+    import streamlit as st
+
+    cols = st.columns(len(items))
+    for col, (value, label) in zip(cols, items):
+        col.markdown(metric_card_html(value, label), unsafe_allow_html=True)
+
+
+def render_metadata_grid(rows: list[tuple[str, str]]) -> None:
+    import streamlit as st
+
+    table = "\n".join(f"| {label} | {value} |" for label, value in rows)
+    st.markdown(f"| | |\n|---|---|\n{table}")
+
+
+def render_evidence_panel(sentences: list[str]) -> None:
+    import streamlit as st
+
+    for sentence in sentences:
+        st.markdown(f"- {sentence}")
+
+
+def render_info_callout(text: str) -> None:
+    import streamlit as st
+
+    st.markdown(info_callout_html(text), unsafe_allow_html=True)
+
+
+def render_empty_state(title: str, body: str) -> None:
+    import streamlit as st
+
+    st.markdown(empty_state_html(title, body), unsafe_allow_html=True)
 
 
 def render_how_it_works() -> None:
