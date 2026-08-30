@@ -212,9 +212,14 @@ def test_fp32_and_int8_calibrated_thresholds_are_distinct_and_frozen():
     assert FP32_CALIBRATED_THRESHOLD != INT8_DYNAMIC_CALIBRATED_THRESHOLD
 
 
-def test_int8_model_config_is_disabled_and_documents_pending_distribution():
+def test_int8_model_config_is_published_and_pinned():
+    # Published to Hugging Face (docs/spectra_streamlit_candidate.md):
+    # repository/revision are real, resolvable, and pinned -- no more
+    # PENDING_HF_PUBLISH placeholders.
     config = load_models_config().get("spectra_aasist3_onnx_int8")
-    assert config.enabled is False
+    assert config.enabled is True
+    assert config.repository == "Limitless-8/spectra-aasist3-int8-audio-deepfake"
+    assert config.revision == "b56aed04853cb4e5bf825025c54c93d4bc345c61"
     assert config.checkpoint_filename == "spectra-aasist3-int8-dynamic.onnx"
     assert config.checkpoint_size_bytes == 364036647
 
