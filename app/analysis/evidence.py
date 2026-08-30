@@ -66,6 +66,8 @@ class SegmentAgreement:
     n_bonafide_leaning: int
     dominant_direction: str  # "spoof" | "bonafide" | "tied"
     agreement_percent: float
+    score_mean: float
+    score_median: float
     score_std: float
     score_range: float
     level: str  # "High" | "Moderate" | "Mixed"
@@ -123,6 +125,8 @@ def compute_segment_agreement(window_spoof_probs: list[float]) -> SegmentAgreeme
         n_bonafide_leaning=n_bonafide_leaning,
         dominant_direction=dominant_direction,
         agreement_percent=agreement_percent,
+        score_mean=float(np.mean(scores)),
+        score_median=float(np.median(scores)),
         score_std=float(np.std(scores)),
         score_range=float(np.max(scores) - np.min(scores)),
         level=level,

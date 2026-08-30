@@ -33,7 +33,7 @@ def test_app_renders_without_error(app):
 
 def test_app_headline_present(app):
     text = _all_markdown_text(app)
-    assert "Detect AI-generated" in text
+    assert "Detect synthetic and cloned speech" in text
 
 
 def test_app_has_file_uploader(app):

@@ -76,6 +76,11 @@ def test_ffmpeg_available_returns_string_or_none():
     assert result is None or isinstance(result, str)
 
 
+def test_robustness_result_processing_time_ms_defaults_to_zero():
+    result = RobustnessResult("original", "Original", 0.9, "SPOOF", 0.0)
+    assert result.processing_time_ms == 0.0
+
+
 @pytest.mark.integration
 @pytest.mark.slow
 def test_run_robustness_analysis_cleans_up_temp_files_and_covers_all_conditions():
@@ -94,7 +99,10 @@ def test_run_robustness_analysis_cleans_up_temp_files_and_covers_all_conditions(
         sample = AudioSample(waveform=waveform, sample_rate=16000, duration_seconds=4.0, source_name="test")
 
         before = set(os.listdir(tempfile.gettempdir()))
-        results = run_robustness_analysis(detector, sample, threshold)
+        started = []
+        results = run_robustness_analysis(
+            detector, sample, threshold, on_condition_start=lambda key, label: started.append((key, label))
+        )
         after = set(os.listdir(tempfile.gettempdir()))
 
         assert after == before, "run_robustness_analysis must not leave temporary files behind"
@@ -103,5 +111,9 @@ def test_run_robustness_analysis_cleans_up_temp_files_and_covers_all_conditions(
         assert results[0].delta_pp_from_original == 0.0
         for r in results[1:]:
             assert r.delta_pp_from_original is not None
+        for r in results:
+            assert r.processing_time_ms > 0.0
+        assert len(started) == len(results)
+        assert started[0] == ("original", "Original")
     finally:
         detector.unload()

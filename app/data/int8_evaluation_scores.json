@@ -1,0 +1,1012 @@
+{
+  "_provenance": {
+    "purpose": "Real per-clip INT8 spoof scores on the frozen 200-clip evaluation set, recomputed via the unchanged production adapter (spectra_aasist3_onnx_int8) for the Evaluation page Threshold Explorer. Recomputation is a read-only re-run of the frozen, unmodified predict() path -- no model, threshold, or preprocessing change.",
+    "n_records": 200,
+    "model_id": "spectra_aasist3_onnx_int8",
+    "threshold_used_in_production": 0.939693808555603,
+    "dataset": "SpeechAntiSpoofingBenchmarks/InTheWild evaluation split (seed=2024)",
+    "generated": "2026-08-31"
+  },
+  "records": [
+    {
+      "utterance_id": "ITW_10234",
+      "label": "spoof",
+      "spoof_score": 0.9776042699813843
+    },
+    {
+      "utterance_id": "ITW_10763",
+      "label": "spoof",
+      "spoof_score": 0.9646651744842529
+    },
+    {
+      "utterance_id": "ITW_10814",
+      "label": "spoof",
+      "spoof_score": 0.9935130476951599
+    },
+    {
+      "utterance_id": "ITW_1084",
+      "label": "bonafide",
+      "spoof_score": 5.8137650249534545e-09
+    },
+    {
+      "utterance_id": "ITW_11243",
+      "label": "spoof",
+      "spoof_score": 0.9744043350219727
+    },
+    {
+      "utterance_id": "ITW_11326",
+      "label": "bonafide",
+      "spoof_score": 2.750181593569323e-08
+    },
+    {
+      "utterance_id": "ITW_11449",
+      "label": "bonafide",
+      "spoof_score": 2.2054487125444666e-09
+    },
+    {
+      "utterance_id": "ITW_11492",
+      "label": "bonafide",
+      "spoof_score": 2.909215254476294e-05
+    },
+    {
+      "utterance_id": "ITW_11855",
+      "label": "bonafide",
+      "spoof_score": 2.1352388746009865e-09
+    },
+    {
+      "utterance_id": "ITW_11925",
+      "label": "bonafide",
+      "spoof_score": 3.4701095330547105e-08
+    },
+    {
+      "utterance_id": "ITW_11958",
+      "label": "bonafide",
+      "spoof_score": 1.4561618577602076e-09
+    },
+    {
+      "utterance_id": "ITW_12079",
+      "label": "spoof",
+      "spoof_score": 0.9654837250709534
+    },
+    {
+      "utterance_id": "ITW_12193",
+      "label": "spoof",
+      "spoof_score": 0.9728745818138123
+    },
+    {
+      "utterance_id": "ITW_12341",
+      "label": "bonafide",
+      "spoof_score": 1.5428378574711132e-09
+    },
+    {
+      "utterance_id": "ITW_12420",
+      "label": "spoof",
+      "spoof_score": 0.974636971950531
+    },
+    {
+      "utterance_id": "ITW_125",
+      "label": "bonafide",
+      "spoof_score": 3.1209068662718664e-09
+    },
+    {
+      "utterance_id": "ITW_1270",
+      "label": "spoof",
+      "spoof_score": 0.9697595238685608
+    },
+    {
+      "utterance_id": "ITW_12751",
+      "label": "bonafide",
+      "spoof_score": 0.9851843118667603
+    },
+    {
+      "utterance_id": "ITW_12776",
+      "label": "bonafide",
+      "spoof_score": 0.010582794435322285
+    },
+    {
+      "utterance_id": "ITW_13340",
+      "label": "spoof",
+      "spoof_score": 0.8918792605400085
+    },
+    {
+      "utterance_id": "ITW_13462",
+      "label": "spoof",
+      "spoof_score": 0.9756156802177429
+    },
+    {
+      "utterance_id": "ITW_13972",
+      "label": "bonafide",
+      "spoof_score": 4.1155843177875795e-09
+    },
+    {
+      "utterance_id": "ITW_14053",
+      "label": "bonafide",
+      "spoof_score": 1.1874151661928067e-09
+    },
+    {
+      "utterance_id": "ITW_14075",
+      "label": "bonafide",
+      "spoof_score": 4.6463813418995414e-07
+    },
+    {
+      "utterance_id": "ITW_14250",
+      "label": "spoof",
+      "spoof_score": 0.9737066030502319
+    },
+    {
+      "utterance_id": "ITW_14296",
+      "label": "bonafide",
+      "spoof_score": 1.972849439368929e-09
+    },
+    {
+      "utterance_id": "ITW_14393",
+      "label": "spoof",
+      "spoof_score": 0.9904305338859558
+    },
+    {
+      "utterance_id": "ITW_14415",
+      "label": "spoof",
+      "spoof_score": 0.9832914471626282
+    },
+    {
+      "utterance_id": "ITW_14658",
+      "label": "bonafide",
+      "spoof_score": 1.350271983113771e-08
+    },
+    {
+      "utterance_id": "ITW_14784",
+      "label": "spoof",
+      "spoof_score": 0.9988003969192505
+    },
+    {
+      "utterance_id": "ITW_1490",
+      "label": "spoof",
+      "spoof_score": 0.9740762114524841
+    },
+    {
+      "utterance_id": "ITW_15028",
+      "label": "bonafide",
+      "spoof_score": 1.4798360759016305e-08
+    },
+    {
+      "utterance_id": "ITW_15371",
+      "label": "bonafide",
+      "spoof_score": 3.0667666184314157e-09
+    },
+    {
+      "utterance_id": "ITW_15591",
+      "label": "spoof",
+      "spoof_score": 0.9560151100158691
+    },
+    {
+      "utterance_id": "ITW_15630",
+      "label": "spoof",
+      "spoof_score": 0.9925715327262878
+    },
+    {
+      "utterance_id": "ITW_15835",
+      "label": "bonafide",
+      "spoof_score": 5.428530958084821e-09
+    },
+    {
+      "utterance_id": "ITW_15887",
+      "label": "spoof",
+      "spoof_score": 0.9787792563438416
+    },
+    {
+      "utterance_id": "ITW_16268",
+      "label": "bonafide",
+      "spoof_score": 1.4563764416664071e-08
+    },
+    {
+      "utterance_id": "ITW_16283",
+      "label": "spoof",
+      "spoof_score": 0.9260340332984924
+    },
+    {
+      "utterance_id": "ITW_16473",
+      "label": "bonafide",
+      "spoof_score": 9.937066636211966e-08
+    },
+    {
+      "utterance_id": "ITW_16551",
+      "label": "spoof",
+      "spoof_score": 0.940518319606781
+    },
+    {
+      "utterance_id": "ITW_16567",
+      "label": "spoof",
+      "spoof_score": 0.9823827743530273
+    },
+    {
+      "utterance_id": "ITW_16597",
+      "label": "bonafide",
+      "spoof_score": 4.801777198082391e-09
+    },
+    {
+      "utterance_id": "ITW_16915",
+      "label": "spoof",
+      "spoof_score": 0.9501755833625793
+    },
+    {
+      "utterance_id": "ITW_16987",
+      "label": "spoof",
+      "spoof_score": 0.9539644122123718
+    },
+    {
+      "utterance_id": "ITW_17098",
+      "label": "bonafide",
+      "spoof_score": 1.3288487643592362e-08
+    },
+    {
+      "utterance_id": "ITW_17285",
+      "label": "bonafide",
+      "spoof_score": 4.427242572546675e-09
+    },
+    {
+      "utterance_id": "ITW_17295",
+      "label": "spoof",
+      "spoof_score": 0.9599583745002747
+    },
+    {
+      "utterance_id": "ITW_17437",
+      "label": "spoof",
+      "spoof_score": 0.9175893068313599
+    },
+    {
+      "utterance_id": "ITW_17449",
+      "label": "bonafide",
+      "spoof_score": 4.140885891956714e-07
+    },
+    {
+      "utterance_id": "ITW_17518",
+      "label": "bonafide",
+      "spoof_score": 0.26438140869140625
+    },
+    {
+      "utterance_id": "ITW_17632",
+      "label": "spoof",
+      "spoof_score": 0.9991080164909363
+    },
+    {
+      "utterance_id": "ITW_1799",
+      "label": "spoof",
+      "spoof_score": 0.9862915873527527
+    },
+    {
+      "utterance_id": "ITW_18047",
+      "label": "bonafide",
+      "spoof_score": 1.6426399129798597e-09
+    },
+    {
+      "utterance_id": "ITW_18177",
+      "label": "spoof",
+      "spoof_score": 0.9707226753234863
+    },
+    {
+      "utterance_id": "ITW_18225",
+      "label": "bonafide",
+      "spoof_score": 1.9500769887770275e-09
+    },
+    {
+      "utterance_id": "ITW_18480",
+      "label": "spoof",
+      "spoof_score": 0.9383260011672974
+    },
+    {
+      "utterance_id": "ITW_18488",
+      "label": "bonafide",
+      "spoof_score": 3.85351928144928e-09
+    },
+    {
+      "utterance_id": "ITW_18558",
+      "label": "bonafide",
+      "spoof_score": 0.0850687325000763
+    },
+    {
+      "utterance_id": "ITW_18798",
+      "label": "spoof",
+      "spoof_score": 0.9902917742729187
+    },
+    {
+      "utterance_id": "ITW_18807",
+      "label": "spoof",
+      "spoof_score": 0.9819408655166626
+    },
+    {
+      "utterance_id": "ITW_19105",
+      "label": "spoof",
+      "spoof_score": 0.9794573783874512
+    },
+    {
+      "utterance_id": "ITW_19300",
+      "label": "spoof",
+      "spoof_score": 0.9462950229644775
+    },
+    {
+      "utterance_id": "ITW_19307",
+      "label": "spoof",
+      "spoof_score": 0.9722240567207336
+    },
+    {
+      "utterance_id": "ITW_19314",
+      "label": "spoof",
+      "spoof_score": 0.9835441708564758
+    },
+    {
+      "utterance_id": "ITW_19359",
+      "label": "spoof",
+      "spoof_score": 0.9867932200431824
+    },
+    {
+      "utterance_id": "ITW_19562",
+      "label": "spoof",
+      "spoof_score": 0.9905706644058228
+    },
+    {
+      "utterance_id": "ITW_19607",
+      "label": "spoof",
+      "spoof_score": 0.9731096625328064
+    },
+    {
+      "utterance_id": "ITW_19817",
+      "label": "spoof",
+      "spoof_score": 0.9865944385528564
+    },
+    {
+      "utterance_id": "ITW_19825",
+      "label": "spoof",
+      "spoof_score": 0.953555703163147
+    },
+    {
+      "utterance_id": "ITW_19929",
+      "label": "bonafide",
+      "spoof_score": 1.8044724603427653e-09
+    },
+    {
+      "utterance_id": "ITW_20004",
+      "label": "spoof",
+      "spoof_score": 0.9924114942550659
+    },
+    {
+      "utterance_id": "ITW_20602",
+      "label": "spoof",
+      "spoof_score": 0.9790928363800049
+    },
+    {
+      "utterance_id": "ITW_20822",
+      "label": "bonafide",
+      "spoof_score": 1.4675833881483413e-08
+    },
+    {
+      "utterance_id": "ITW_20843",
+      "label": "spoof",
+      "spoof_score": 0.9765843749046326
+    },
+    {
+      "utterance_id": "ITW_20870",
+      "label": "spoof",
+      "spoof_score": 0.9815512895584106
+    },
+    {
+      "utterance_id": "ITW_2089",
+      "label": "spoof",
+      "spoof_score": 0.9570574164390564
+    },
+    {
+      "utterance_id": "ITW_21093",
+      "label": "bonafide",
+      "spoof_score": 1.633055690675178e-09
+    },
+    {
+      "utterance_id": "ITW_21100",
+      "label": "bonafide",
+      "spoof_score": 1.2526280013247515e-09
+    },
+    {
+      "utterance_id": "ITW_21196",
+      "label": "bonafide",
+      "spoof_score": 1.6357336596328764e-09
+    },
+    {
+      "utterance_id": "ITW_21627",
+      "label": "bonafide",
+      "spoof_score": 0.14303798973560333
+    },
+    {
+      "utterance_id": "ITW_21717",
+      "label": "bonafide",
+      "spoof_score": 7.996298734269658e-09
+    },
+    {
+      "utterance_id": "ITW_21878",
+      "label": "spoof",
+      "spoof_score": 0.9869532585144043
+    },
+    {
+      "utterance_id": "ITW_2215",
+      "label": "spoof",
+      "spoof_score": 0.9997764229774475
+    },
+    {
+      "utterance_id": "ITW_22775",
+      "label": "spoof",
+      "spoof_score": 0.9541258811950684
+    },
+    {
+      "utterance_id": "ITW_23009",
+      "label": "spoof",
+      "spoof_score": 0.9710912704467773
+    },
+    {
+      "utterance_id": "ITW_23023",
+      "label": "spoof",
+      "spoof_score": 0.9310222268104553
+    },
+    {
+      "utterance_id": "ITW_23117",
+      "label": "bonafide",
+      "spoof_score": 0.9989506006240845
+    },
+    {
+      "utterance_id": "ITW_23124",
+      "label": "bonafide",
+      "spoof_score": 4.685376087110171e-09
+    },
+    {
+      "utterance_id": "ITW_23155",
+      "label": "bonafide",
+      "spoof_score": 0.013061192817986012
+    },
+    {
+      "utterance_id": "ITW_23168",
+      "label": "spoof",
+      "spoof_score": 0.9860153198242188
+    },
+    {
+      "utterance_id": "ITW_2351",
+      "label": "spoof",
+      "spoof_score": 0.9622147083282471
+    },
+    {
+      "utterance_id": "ITW_23514",
+      "label": "spoof",
+      "spoof_score": 0.9873795509338379
+    },
+    {
+      "utterance_id": "ITW_23518",
+      "label": "bonafide",
+      "spoof_score": 1.366732615970534e-09
+    },
+    {
+      "utterance_id": "ITW_23858",
+      "label": "spoof",
+      "spoof_score": 0.9794875979423523
+    },
+    {
+      "utterance_id": "ITW_23932",
+      "label": "bonafide",
+      "spoof_score": 0.0005003715632483363
+    },
+    {
+      "utterance_id": "ITW_23946",
+      "label": "bonafide",
+      "spoof_score": 7.565012616339573e-09
+    },
+    {
+      "utterance_id": "ITW_23951",
+      "label": "bonafide",
+      "spoof_score": 0.001122386660426855
+    },
+    {
+      "utterance_id": "ITW_24023",
+      "label": "bonafide",
+      "spoof_score": 2.970009127523099e-09
+    },
+    {
+      "utterance_id": "ITW_24048",
+      "label": "spoof",
+      "spoof_score": 0.9976440072059631
+    },
+    {
+      "utterance_id": "ITW_24260",
+      "label": "spoof",
+      "spoof_score": 0.975229799747467
+    },
+    {
+      "utterance_id": "ITW_24462",
+      "label": "bonafide",
+      "spoof_score": 3.622014466131418e-09
+    },
+    {
+      "utterance_id": "ITW_24579",
+      "label": "spoof",
+      "spoof_score": 0.9701884388923645
+    },
+    {
+      "utterance_id": "ITW_2458",
+      "label": "bonafide",
+      "spoof_score": 1.109943159605109e-08
+    },
+    {
+      "utterance_id": "ITW_24838",
+      "label": "spoof",
+      "spoof_score": 0.9600971937179565
+    },
+    {
+      "utterance_id": "ITW_25338",
+      "label": "bonafide",
+      "spoof_score": 9.179944804316165e-09
+    },
+    {
+      "utterance_id": "ITW_25339",
+      "label": "spoof",
+      "spoof_score": 0.9594832062721252
+    },
+    {
+      "utterance_id": "ITW_25503",
+      "label": "spoof",
+      "spoof_score": 0.9996016621589661
+    },
+    {
+      "utterance_id": "ITW_2551",
+      "label": "bonafide",
+      "spoof_score": 1.4790648705798048e-09
+    },
+    {
+      "utterance_id": "ITW_25611",
+      "label": "bonafide",
+      "spoof_score": 6.424580867303575e-09
+    },
+    {
+      "utterance_id": "ITW_25751",
+      "label": "bonafide",
+      "spoof_score": 1.541878846822442e-09
+    },
+    {
+      "utterance_id": "ITW_25801",
+      "label": "bonafide",
+      "spoof_score": 2.006093069439885e-09
+    },
+    {
+      "utterance_id": "ITW_25809",
+      "label": "spoof",
+      "spoof_score": 0.9455391764640808
+    },
+    {
+      "utterance_id": "ITW_25916",
+      "label": "bonafide",
+      "spoof_score": 2.554810363264437e-09
+    },
+    {
+      "utterance_id": "ITW_25995",
+      "label": "bonafide",
+      "spoof_score": 9.119874633256586e-09
+    },
+    {
+      "utterance_id": "ITW_26018",
+      "label": "bonafide",
+      "spoof_score": 8.820595098768536e-08
+    },
+    {
+      "utterance_id": "ITW_26309",
+      "label": "spoof",
+      "spoof_score": 0.9722117781639099
+    },
+    {
+      "utterance_id": "ITW_26357",
+      "label": "spoof",
+      "spoof_score": 0.9148539900779724
+    },
+    {
+      "utterance_id": "ITW_26602",
+      "label": "bonafide",
+      "spoof_score": 1.466972654462495e-09
+    },
+    {
+      "utterance_id": "ITW_26781",
+      "label": "bonafide",
+      "spoof_score": 1.9006908047458637e-08
+    },
+    {
+      "utterance_id": "ITW_26816",
+      "label": "spoof",
+      "spoof_score": 0.970289945602417
+    },
+    {
+      "utterance_id": "ITW_26824",
+      "label": "spoof",
+      "spoof_score": 0.9894960522651672
+    },
+    {
+      "utterance_id": "ITW_26859",
+      "label": "spoof",
+      "spoof_score": 0.9986047148704529
+    },
+    {
+      "utterance_id": "ITW_26910",
+      "label": "bonafide",
+      "spoof_score": 1.6626339194303341e-09
+    },
+    {
+      "utterance_id": "ITW_27277",
+      "label": "spoof",
+      "spoof_score": 0.9615522623062134
+    },
+    {
+      "utterance_id": "ITW_27569",
+      "label": "bonafide",
+      "spoof_score": 2.3081680566860996e-08
+    },
+    {
+      "utterance_id": "ITW_27640",
+      "label": "bonafide",
+      "spoof_score": 1.4339962550735663e-09
+    },
+    {
+      "utterance_id": "ITW_27981",
+      "label": "bonafide",
+      "spoof_score": 1.111455261160188e-09
+    },
+    {
+      "utterance_id": "ITW_28760",
+      "label": "bonafide",
+      "spoof_score": 1.900428925338815e-09
+    },
+    {
+      "utterance_id": "ITW_28864",
+      "label": "bonafide",
+      "spoof_score": 0.9005112648010254
+    },
+    {
+      "utterance_id": "ITW_29071",
+      "label": "spoof",
+      "spoof_score": 0.9829975366592407
+    },
+    {
+      "utterance_id": "ITW_2911",
+      "label": "bonafide",
+      "spoof_score": 6.031894539404448e-09
+    },
+    {
+      "utterance_id": "ITW_29169",
+      "label": "spoof",
+      "spoof_score": 0.9804093837738037
+    },
+    {
+      "utterance_id": "ITW_29368",
+      "label": "bonafide",
+      "spoof_score": 2.296227430420572e-09
+    },
+    {
+      "utterance_id": "ITW_2937",
+      "label": "bonafide",
+      "spoof_score": 1.5239356443430552e-09
+    },
+    {
+      "utterance_id": "ITW_29585",
+      "label": "spoof",
+      "spoof_score": 0.9770941138267517
+    },
+    {
+      "utterance_id": "ITW_29890",
+      "label": "bonafide",
+      "spoof_score": 3.5485796523460067e-09
+    },
+    {
+      "utterance_id": "ITW_30035",
+      "label": "bonafide",
+      "spoof_score": 3.0792157712511425e-09
+    },
+    {
+      "utterance_id": "ITW_30155",
+      "label": "bonafide",
+      "spoof_score": 2.3318540431915835e-09
+    },
+    {
+      "utterance_id": "ITW_30490",
+      "label": "bonafide",
+      "spoof_score": 0.0002652029797900468
+    },
+    {
+      "utterance_id": "ITW_30583",
+      "label": "bonafide",
+      "spoof_score": 3.8803787901997566e-05
+    },
+    {
+      "utterance_id": "ITW_30629",
+      "label": "spoof",
+      "spoof_score": 0.99962317943573
+    },
+    {
+      "utterance_id": "ITW_30774",
+      "label": "bonafide",
+      "spoof_score": 2.658533837518462e-09
+    },
+    {
+      "utterance_id": "ITW_3084",
+      "label": "spoof",
+      "spoof_score": 7.816259426363104e-07
+    },
+    {
+      "utterance_id": "ITW_30920",
+      "label": "spoof",
+      "spoof_score": 0.996309220790863
+    },
+    {
+      "utterance_id": "ITW_31",
+      "label": "spoof",
+      "spoof_score": 0.96485835313797
+    },
+    {
+      "utterance_id": "ITW_3102",
+      "label": "bonafide",
+      "spoof_score": 1.0609824130369816e-06
+    },
+    {
+      "utterance_id": "ITW_311",
+      "label": "bonafide",
+      "spoof_score": 8.716460331292808e-10
+    },
+    {
+      "utterance_id": "ITW_31187",
+      "label": "spoof",
+      "spoof_score": 0.9853312969207764
+    },
+    {
+      "utterance_id": "ITW_3122",
+      "label": "bonafide",
+      "spoof_score": 1.7715160449682799e-09
+    },
+    {
+      "utterance_id": "ITW_31480",
+      "label": "bonafide",
+      "spoof_score": 5.853256013210739e-08
+    },
+    {
+      "utterance_id": "ITW_3235",
+      "label": "spoof",
+      "spoof_score": 0.952368438243866
+    },
+    {
+      "utterance_id": "ITW_3406",
+      "label": "bonafide",
+      "spoof_score": 9.537964862360582e-10
+    },
+    {
+      "utterance_id": "ITW_3505",
+      "label": "bonafide",
+      "spoof_score": 1.5244910889222751e-09
+    },
+    {
+      "utterance_id": "ITW_3520",
+      "label": "bonafide",
+      "spoof_score": 1.8641878341441043e-05
+    },
+    {
+      "utterance_id": "ITW_3535",
+      "label": "spoof",
+      "spoof_score": 0.9916380047798157
+    },
+    {
+      "utterance_id": "ITW_3974",
+      "label": "bonafide",
+      "spoof_score": 1.7219546899482907e-09
+    },
+    {
+      "utterance_id": "ITW_4460",
+      "label": "bonafide",
+      "spoof_score": 1.1269027709204238e-05
+    },
+    {
+      "utterance_id": "ITW_460",
+      "label": "spoof",
+      "spoof_score": 0.979123592376709
+    },
+    {
+      "utterance_id": "ITW_4825",
+      "label": "bonafide",
+      "spoof_score": 1.5604439962402239e-09
+    },
+    {
+      "utterance_id": "ITW_5071",
+      "label": "bonafide",
+      "spoof_score": 1.7271682972719304e-09
+    },
+    {
+      "utterance_id": "ITW_5158",
+      "label": "bonafide",
+      "spoof_score": 1.4607080878192846e-08
+    },
+    {
+      "utterance_id": "ITW_5307",
+      "label": "bonafide",
+      "spoof_score": 9.923122767929726e-09
+    },
+    {
+      "utterance_id": "ITW_543",
+      "label": "bonafide",
+      "spoof_score": 1.9910131321410063e-09
+    },
+    {
+      "utterance_id": "ITW_5467",
+      "label": "spoof",
+      "spoof_score": 0.9661781787872314
+    },
+    {
+      "utterance_id": "ITW_5480",
+      "label": "spoof",
+      "spoof_score": 0.9541031122207642
+    },
+    {
+      "utterance_id": "ITW_549",
+      "label": "spoof",
+      "spoof_score": 0.9893938899040222
+    },
+    {
+      "utterance_id": "ITW_5812",
+      "label": "bonafide",
+      "spoof_score": 9.092154584777745e-09
+    },
+    {
+      "utterance_id": "ITW_5820",
+      "label": "spoof",
+      "spoof_score": 0.9983007311820984
+    },
+    {
+      "utterance_id": "ITW_5990",
+      "label": "spoof",
+      "spoof_score": 0.9999520778656006
+    },
+    {
+      "utterance_id": "ITW_6254",
+      "label": "spoof",
+      "spoof_score": 0.9625779390335083
+    },
+    {
+      "utterance_id": "ITW_6287",
+      "label": "spoof",
+      "spoof_score": 0.9917152523994446
+    },
+    {
+      "utterance_id": "ITW_6311",
+      "label": "bonafide",
+      "spoof_score": 2.6696209687315786e-09
+    },
+    {
+      "utterance_id": "ITW_6376",
+      "label": "spoof",
+      "spoof_score": 0.9748279452323914
+    },
+    {
+      "utterance_id": "ITW_649",
+      "label": "bonafide",
+      "spoof_score": 1.7838302710515563e-06
+    },
+    {
+      "utterance_id": "ITW_65",
+      "label": "spoof",
+      "spoof_score": 0.9520949721336365
+    },
+    {
+      "utterance_id": "ITW_6532",
+      "label": "spoof",
+      "spoof_score": 0.9991288781166077
+    },
+    {
+      "utterance_id": "ITW_6675",
+      "label": "spoof",
+      "spoof_score": 0.9888343214988708
+    },
+    {
+      "utterance_id": "ITW_679",
+      "label": "bonafide",
+      "spoof_score": 8.783472615903065e-09
+    },
+    {
+      "utterance_id": "ITW_7126",
+      "label": "bonafide",
+      "spoof_score": 1.3857738290212751e-09
+    },
+    {
+      "utterance_id": "ITW_7131",
+      "label": "bonafide",
+      "spoof_score": 5.4114122072235205e-09
+    },
+    {
+      "utterance_id": "ITW_7228",
+      "label": "bonafide",
+      "spoof_score": 5.6005311499518484e-09
+    },
+    {
+      "utterance_id": "ITW_7376",
+      "label": "bonafide",
+      "spoof_score": 1.6317076578786782e-09
+    },
+    {
+      "utterance_id": "ITW_7498",
+      "label": "spoof",
+      "spoof_score": 0.9711449146270752
+    },
+    {
+      "utterance_id": "ITW_7878",
+      "label": "spoof",
+      "spoof_score": 0.9818846583366394
+    },
+    {
+      "utterance_id": "ITW_7911",
+      "label": "bonafide",
+      "spoof_score": 3.4370492585367174e-07
+    },
+    {
+      "utterance_id": "ITW_8090",
+      "label": "spoof",
+      "spoof_score": 0.9864566326141357
+    },
+    {
+      "utterance_id": "ITW_8193",
+      "label": "spoof",
+      "spoof_score": 0.9736547470092773
+    },
+    {
+      "utterance_id": "ITW_8382",
+      "label": "bonafide",
+      "spoof_score": 1.3863027392702065e-09
+    },
+    {
+      "utterance_id": "ITW_8471",
+      "label": "bonafide",
+      "spoof_score": 1.5581657075713906e-09
+    },
+    {
+      "utterance_id": "ITW_8572",
+      "label": "bonafide",
+      "spoof_score": 1.6475066866306065e-09
+    },
+    {
+      "utterance_id": "ITW_8673",
+      "label": "spoof",
+      "spoof_score": 0.9474141001701355
+    },
+    {
+      "utterance_id": "ITW_8736",
+      "label": "spoof",
+      "spoof_score": 0.8866757750511169
+    },
+    {
+      "utterance_id": "ITW_8857",
+      "label": "spoof",
+      "spoof_score": 0.9377249479293823
+    },
+    {
+      "utterance_id": "ITW_8863",
+      "label": "bonafide",
+      "spoof_score": 1.253565429237824e-08
+    },
+    {
+      "utterance_id": "ITW_9040",
+      "label": "spoof",
+      "spoof_score": 0.9664924144744873
+    },
+    {
+      "utterance_id": "ITW_9168",
+      "label": "spoof",
+      "spoof_score": 0.9568668603897095
+    },
+    {
+      "utterance_id": "ITW_9309",
+      "label": "spoof",
+      "spoof_score": 0.9655641317367554
+    },
+    {
+      "utterance_id": "ITW_9370",
+      "label": "spoof",
+      "spoof_score": 0.928525447845459
+    },
+    {
+      "utterance_id": "ITW_9984",
+      "label": "bonafide",
+      "spoof_score": 1.6341057396118686e-09
+    }
+  ]
+}

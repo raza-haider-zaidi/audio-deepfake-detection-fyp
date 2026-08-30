@@ -16,9 +16,14 @@ already-available, reliable method for it exists in this project.
 
 from __future__ import annotations
 
+import json
+import shutil
+import subprocess
 from dataclasses import dataclass
 
 import numpy as np
+
+NOT_AVAILABLE = "Not available"
 
 SILENCE_AMPLITUDE_THRESHOLD = 0.01  # matches a common -40 dBFS-ish practical silence cutoff
 CLIPPING_AMPLITUDE_THRESHOLD = 0.999  # samples this close to full-scale are considered clipped
@@ -96,3 +101,54 @@ def assess_analysis_suitability(metrics: AudioQualityMetrics) -> SuitabilityAsse
         return SuitabilityAssessment("Limited", reasons)
 
     return SuitabilityAssessment("Good", [])
+
+
+@dataclass
+class MediaMetadata:
+    container: str
+    codec: str
+    bitrate_kbps: str
+    duration_seconds: str
+    sample_rate: str
+    channels: str
+
+
+def _ffprobe_field(value) -> str:
+    return str(value) if value not in (None, "", "N/A", "unknown") else NOT_AVAILABLE
+
+
+def probe_media_metadata(file_path: str) -> MediaMetadata:
+    """Real container/codec/bitrate metadata via ffprobe, when available.
+    NEVER guesses -- any field ffprobe cannot report, or if ffprobe itself
+    is unavailable, is shown as "Not available" rather than fabricated."""
+    ffprobe = shutil.which("ffprobe")
+    if ffprobe is None:
+        return MediaMetadata(NOT_AVAILABLE, NOT_AVAILABLE, NOT_AVAILABLE, NOT_AVAILABLE, NOT_AVAILABLE, NOT_AVAILABLE)
+
+    try:
+        proc = subprocess.run(
+            [ffprobe, "-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", file_path],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=True,
+        )
+        info = json.loads(proc.stdout)
+    except (subprocess.SubprocessError, json.JSONDecodeError, OSError):
+        return MediaMetadata(NOT_AVAILABLE, NOT_AVAILABLE, NOT_AVAILABLE, NOT_AVAILABLE, NOT_AVAILABLE, NOT_AVAILABLE)
+
+    fmt = info.get("format", {})
+    audio_streams = [s for s in info.get("streams", []) if s.get("codec_type") == "audio"]
+    stream = audio_streams[0] if audio_streams else {}
+
+    bitrate = fmt.get("bit_rate") or stream.get("bit_rate")
+    bitrate_kbps = f"{int(bitrate) / 1000:.0f} kbps" if bitrate else NOT_AVAILABLE
+
+    return MediaMetadata(
+        container=_ffprobe_field(fmt.get("format_long_name") or fmt.get("format_name")),
+        codec=_ffprobe_field(stream.get("codec_long_name") or stream.get("codec_name")),
+        bitrate_kbps=bitrate_kbps,
+        duration_seconds=_ffprobe_field(f"{float(fmt['duration']):.2f} s" if fmt.get("duration") else None),
+        sample_rate=_ffprobe_field(f"{stream['sample_rate']} Hz" if stream.get("sample_rate") else None),
+        channels=_ffprobe_field(stream.get("channels")),
+    )
