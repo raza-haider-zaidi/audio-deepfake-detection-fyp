@@ -1,10 +1,14 @@
-"""AI Voice Deepfake Detector — Streamlit entrypoint.
+"""AI Voice Deepfake Detector — Streamlit entrypoint (Analyze page).
 
 Presentation layer only. All preprocessing/model/inference logic lives
 under src/audio_deepfake_detector; this file (and the helpers under app/)
 never implement model logic directly. Visual design lives in
-app/styles.py (tokens + CSS) and app/components.py (reusable markup) --
-see docs/ui_ux_design.md for the full design system and rationale.
+app/styles.py (tokens + CSS) and app/components.py (reusable markup).
+Supplementary, descriptive analysis (audio quality, segment evidence,
+evidence summary, robustness, reporting) lives under app/analysis/ and
+app/reporting/ -- see docs/analysis_platform.md for the full
+architecture and the explicit statement that none of it alters the
+frozen Spectra-AASIST3 classification.
 
 Run locally with:
     .\\.venv\\Scripts\\python.exe -m streamlit run streamlit_app.py
@@ -15,12 +19,20 @@ from __future__ import annotations
 import hashlib
 import logging
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
+from app.analysis.audio_quality import assess_analysis_suitability, compute_audio_quality  # noqa: E402
+from app.analysis.evidence import (  # noqa: E402
+    SEGMENT_DURATION_SECONDS,
+    compute_segment_agreement,
+    evidence_summary_sentences,
+    segment_table,
+)
 from app.components import (  # noqa: E402
     probability_comparison_html,
     render_disclaimer,
@@ -38,9 +50,10 @@ from app.components import (  # noqa: E402
 from app.errors import UserFacingError  # noqa: E402
 from app.formatting import result_summary  # noqa: E402
 from app.model_loader import DEPLOYMENT_MODEL_ID, get_detector  # noqa: E402
+from app.reporting.report import build_report_data, render_html_report, render_json_report  # noqa: E402
 from app.styles import inject_global_styles  # noqa: E402
 from app.validation import MAX_DURATION_SECONDS, MAX_FILE_SIZE_BYTES, validate_and_load_upload  # noqa: E402
-from app.visualizations import plot_mel_spectrogram, plot_waveform  # noqa: E402
+from app.visualizations import plot_mel_spectrogram, plot_segment_timeline, plot_waveform  # noqa: E402
 from audio_deepfake_detector.config.models_config import load_models_config  # noqa: E402
 
 logger = logging.getLogger("audio_deepfake_detector.streamlit_app")
@@ -53,7 +66,7 @@ st.set_page_config(
 st.markdown(inject_global_styles(), unsafe_allow_html=True)
 
 
-def _render_technical_details(result, model_config, model_info: dict) -> None:
+def _render_technical_details(result, model_config, model_info: dict, n_segments: int) -> None:
     """Built entirely from the ACTIVE detector's model_info() + model_config
     -- no model-specific string literals here, so this renders correctly
     for whichever model_info dict DEPLOYMENT_MODEL_ID actually resolves to."""
@@ -76,7 +89,7 @@ def _render_technical_details(result, model_config, model_info: dict) -> None:
             ("Input sample rate", f"{sample_rate} Hz"),
             ("Native segment length", native_window),
             ("Device", result.device.upper()),
-            ("Segments analyzed", str(result.windows_analyzed)),
+            ("Segments analyzed", str(n_segments)),
             ("Audio duration", f"{result.audio_duration_seconds:.2f} s"),
             ("Inference time", f"{result.inference_time_ms:.0f} ms"),
         ]
@@ -96,22 +109,22 @@ def _render_technical_details(result, model_config, model_info: dict) -> None:
             st.caption(f"Aggregation method: {aggregation_desc}")
 
 
-def _render_segment_analysis(result) -> None:
-    if result.windows_analyzed <= 1:
-        return
-    from app.formatting import window_table_rows
+def _render_recommended_input() -> None:
+    with st.expander("Recommended input"):
+        st.markdown(
+            """
+For more interpretable results:
+- Use speech-dominant recordings.
+- Prefer the original recording where available, rather than a re-shared copy.
+- Avoid excessive background music.
+- Avoid very short samples.
+- Avoid heavily degraded or repeatedly re-compressed copies where possible.
+- Keep audio within the current 30-second application limit.
 
-    rows = window_table_rows(result)
-    n_spoof_leaning = sum(1 for r in rows if r["Prediction"].startswith("Likely AI"))
-    n_bonafide_leaning = len(rows) - n_spoof_leaning
-
-    render_section_title(
-        "Segment analysis",
-        f"{len(rows)} segments analyzed &middot; {n_spoof_leaning} spoof-leaning &middot; "
-        f"{n_bonafide_leaning} bonafide-leaning",
-    )
-    with st.expander("View segment-level detail"):
-        st.dataframe(rows, use_container_width=True, hide_index=True)
+Following these does not guarantee a particular result — it improves the conditions
+under which the detector was evaluated.
+"""
+        )
 
 
 def _render_upload_privacy_note() -> None:
@@ -120,6 +133,34 @@ def _render_upload_privacy_note() -> None:
 
 def _render_error(message: str) -> None:
     st.error(message, icon=":material/error:")
+
+
+def _render_audio_quality_section(audio_sample, file_size_bytes: int) -> tuple:
+    quality = compute_audio_quality(audio_sample.waveform, audio_sample.sample_rate, file_size_bytes, audio_sample.duration_seconds)
+    suitability = assess_analysis_suitability(quality)
+
+    render_section_title("Analysis conditions")
+    q1, q2, q3, q4 = st.columns(4)
+    q1.metric("Peak amplitude", f"{quality.peak_amplitude:.2f}")
+    q2.metric("RMS level", f"{quality.rms_level:.3f}")
+    q3.metric("Silence ratio", f"{quality.silence_ratio * 100:.0f}%")
+    q4.metric("Clipping", f"{quality.clipping_ratio * 100:.1f}%")
+
+    if suitability.level == "Good":
+        st.caption("Analysis conditions: **Good**")
+    else:
+        reason_text = " and ".join(suitability.reasons)
+        icon = ":material/warning:" if suitability.level == "Limited" else ":material/error:"
+        st.warning(
+            f"**{suitability.level} analysis conditions.** This recording contains {reason_text}. "
+            "Detection results should therefore be interpreted cautiously.",
+            icon=icon,
+        )
+    st.caption(
+        "This assessment is a descriptive signal-quality check and does not influence the "
+        "detector's classification, threshold, or presentation state."
+    )
+    return quality, suitability
 
 
 def main() -> None:
@@ -138,6 +179,7 @@ def main() -> None:
         render_hero()
         st.markdown("")
         _render_upload_privacy_note()
+        _render_recommended_input()
         st.divider()
         render_how_it_works()
         render_why_model()
@@ -180,7 +222,6 @@ def main() -> None:
     analyze_clicked = st.button("Analyze Audio", type="primary")
 
     if analyze_clicked:
-        detector = None
         with st.status("Preparing detector...", expanded=False) as status:
             try:
                 detector = get_detector(DEPLOYMENT_MODEL_ID)
@@ -199,6 +240,11 @@ def main() -> None:
             status.update(label="Running anti-spoof analysis...")
             try:
                 result = detector.predict(audio_sample)
+                segment_probs = None
+                if audio_sample.duration_seconds > SEGMENT_DURATION_SECONDS:
+                    status.update(label="Combining segment results...")
+                    full_clip = detector.predict_full_clip(audio_sample, aggregation="mean")
+                    segment_probs = full_clip["window_spoof_probs"]
             except Exception:  # noqa: BLE001 - convert to friendly UI message
                 logger.exception("Inference failed")
                 status.update(label="Analysis failed", state="error")
@@ -210,12 +256,16 @@ def main() -> None:
                 render_footer()
                 return
 
-            status.update(label="Combining segment results...")
             status.update(label="Preparing visual analysis...")
             status.update(label="Analysis complete", state="complete")
 
         st.session_state["last_result"] = result
         st.session_state["last_result_file_key"] = file_key
+        st.session_state["last_segment_probs"] = segment_probs
+        st.session_state["last_audio_sample"] = audio_sample
+        st.session_state["last_filename"] = uploaded_file.name
+        st.session_state["last_file_bytes_sha256"] = file_key
+        st.session_state.pop("robustness_results", None)
 
     result = (
         st.session_state.get("last_result")
@@ -223,6 +273,7 @@ def main() -> None:
         else None
     )
     if result is not None:
+        segment_probs = st.session_state.get("last_segment_probs")
         detector_for_display = get_detector(DEPLOYMENT_MODEL_ID)
         model_info = detector_for_display.model_info()
         calibrated_threshold = model_info.get("calibrated_threshold_spoof_probability")
@@ -236,16 +287,57 @@ def main() -> None:
         st.markdown("")
         render_result_panel(state, summary["prediction"], _explanation_for_state(state), extra_html)
 
+        n_segments = len(segment_probs) if segment_probs else 1
         render_metrics_row(
             [
                 (f"{result.audio_duration_seconds:.1f} sec", "Audio duration"),
-                (str(result.windows_analyzed), "Segments analyzed"),
+                (str(n_segments), "Segments analyzed"),
                 (f"{result.inference_time_ms / 1000:.1f} sec", "Analysis time"),
                 ("CPU / ONNX", "Runtime"),
             ]
         )
 
-        _render_segment_analysis(result)
+        agreement = compute_segment_agreement(segment_probs) if segment_probs else None
+        with st.expander("Why this result?"):
+            for sentence in evidence_summary_sentences(state, result.probabilities["spoof"], calibrated_threshold, agreement):
+                st.markdown(f"- {sentence}")
+
+        quality, suitability = _render_audio_quality_section(audio_sample, len(file_bytes))
+
+        if segment_probs:
+            st.divider()
+            render_section_title(
+                "Segment evidence",
+                f"{len(segment_probs)} non-overlapping ~{SEGMENT_DURATION_SECONDS:.2f}s segments analyzed as a "
+                "project-level extension (not used for the presented decision above).",
+            )
+            if agreement is not None:
+                st.caption(
+                    f"Segment agreement: **{agreement.level}** — {max(agreement.n_spoof_leaning, agreement.n_bonafide_leaning)} "
+                    f"of {agreement.n_segments} analyzed segments leaned {agreement.dominant_direction} "
+                    f"({agreement.agreement_percent:.0f}% agreement)."
+                )
+            timeline_fig = plot_segment_timeline(segment_probs, SEGMENT_DURATION_SECONDS, calibrated_threshold)
+            st.pyplot(timeline_fig, clear_figure=True)
+            st.caption(
+                "Segments are sequential and non-overlapping. Each segment's interpretation applies the same "
+                "calibrated threshold used for the overall decision, for descriptive purposes only — this is not "
+                "an independently validated per-segment threshold."
+            )
+            with st.expander("View segment-level detail"):
+                rows = segment_table(segment_probs, calibrated_threshold, audio_sample.duration_seconds)
+                display_rows = [
+                    {
+                        "Segment": r["segment"],
+                        "Time range": f"{r['start_seconds']:.2f}s – {r['end_seconds']:.2f}s",
+                        "Bonafide probability": f"{r['bonafide_probability'] * 100:.1f}%",
+                        "Spoof probability": f"{r['spoof_probability'] * 100:.1f}%",
+                        "Interpretation": r["interpretation"],
+                    }
+                    for r in rows
+                ]
+                st.dataframe(display_rows, width='stretch', hide_index=True)
+            st.page_link("pages/2_Robustness.py", label="Run robustness analysis on this clip →")
 
         st.divider()
         render_section_title(
@@ -269,7 +361,48 @@ def main() -> None:
         render_how_it_works()
         render_why_model()
         render_evaluation_section()
-        _render_technical_details(result, model_config, model_info)
+        _render_technical_details(result, model_config, model_info, n_segments)
+
+        st.divider()
+        render_section_title("Download analysis report")
+        generated_at = datetime.now()
+        report_rows = segment_table(segment_probs, calibrated_threshold, audio_sample.duration_seconds) if segment_probs else []
+        report_data = build_report_data(
+            generated_at=generated_at,
+            filename=uploaded_file.name,
+            file_sha256=file_key,
+            duration_seconds=audio_sample.duration_seconds,
+            sample_rate=audio_sample.sample_rate,
+            audio_format=Path(uploaded_file.name).suffix.lstrip(".").upper(),
+            channels=1,
+            presentation_state=state,
+            prediction_label=summary["prediction"],
+            bonafide_probability=result.probabilities["bonafide"],
+            spoof_probability=result.probabilities["spoof"],
+            calibrated_threshold=calibrated_threshold,
+            binary_model_decision=result.binary_model_decision or result.raw_label,
+            n_segments=n_segments,
+            segment_rows=report_rows,
+            segment_agreement=agreement.__dict__ if agreement else None,
+            audio_quality=quality.__dict__,
+            suitability_level=suitability.level,
+            model_info=model_info | {"repository": result.model_repository, "revision": model_config.revision},
+            inference_time_ms=result.inference_time_ms,
+        )
+        report_col1, report_col2 = st.columns(2)
+        report_col1.download_button(
+            "Download HTML report",
+            data=render_html_report(report_data),
+            file_name=f"{report_data['report_id']}.html",
+            mime="text/html",
+        )
+        report_col2.download_button(
+            "Download JSON export",
+            data=render_json_report(report_data),
+            file_name=f"{report_data['report_id']}.json",
+            mime="application/json",
+        )
+        st.caption(f"Report ID: {report_data['report_id']} — a local reproducibility identifier, not a database reference.")
 
     render_disclaimer()
     render_footer()

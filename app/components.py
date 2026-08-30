@@ -156,6 +156,18 @@ def render_page_header() -> None:
     )
 
 
+def setup_page(page_title: str) -> None:
+    """Shared boilerplate for every page/ file: page config, global styles,
+    and the header. Call once at the top of each page module."""
+    import streamlit as st
+
+    from app.styles import inject_global_styles
+
+    st.set_page_config(page_title=f"{page_title} — AI Voice Analysis", layout="wide")
+    st.markdown(inject_global_styles(), unsafe_allow_html=True)
+    render_page_header()
+
+
 def render_hero() -> None:
     import streamlit as st
 
