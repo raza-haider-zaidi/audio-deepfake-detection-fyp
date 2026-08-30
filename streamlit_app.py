@@ -2,7 +2,9 @@
 
 Presentation layer only. All preprocessing/model/inference logic lives
 under src/audio_deepfake_detector; this file (and the helpers under app/)
-never implement model logic directly.
+never implement model logic directly. Visual design lives in
+app/styles.py (tokens + CSS) and app/components.py (reusable markup) --
+see docs/ui_ux_design.md for the full design system and rationale.
 
 Run locally with:
     .\\.venv\\Scripts\\python.exe -m streamlit run streamlit_app.py
@@ -19,9 +21,24 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
+from app.components import (  # noqa: E402
+    probability_comparison_html,
+    render_disclaimer,
+    render_evaluation_section,
+    render_footer,
+    render_hero,
+    render_how_it_works,
+    render_metrics_row,
+    render_page_header,
+    render_result_panel,
+    render_section_title,
+    render_why_model,
+    threshold_visualization_html,
+)
 from app.errors import UserFacingError  # noqa: E402
-from app.formatting import result_summary, window_table_rows  # noqa: E402
+from app.formatting import result_summary  # noqa: E402
 from app.model_loader import DEPLOYMENT_MODEL_ID, get_detector  # noqa: E402
+from app.styles import inject_global_styles  # noqa: E402
 from app.validation import MAX_DURATION_SECONDS, MAX_FILE_SIZE_BYTES, validate_and_load_upload  # noqa: E402
 from app.visualizations import plot_mel_spectrogram, plot_waveform  # noqa: E402
 from audio_deepfake_detector.config.models_config import load_models_config  # noqa: E402
@@ -29,62 +46,17 @@ from audio_deepfake_detector.config.models_config import load_models_config  # n
 logger = logging.getLogger("audio_deepfake_detector.streamlit_app")
 
 st.set_page_config(
-    page_title="AI Voice Deepfake Detector",
+    page_title="AI Voice Analysis",
     page_icon=":studio_microphone:",
     layout="wide",
 )
-
-
-def _render_header() -> None:
-    st.title("AI Voice Deepfake Detector")
-    st.caption(
-        "Detect potentially AI-generated or cloned speech using a pretrained "
-        "Wav2Vec2 anti-spoofing model."
-    )
-    st.markdown(
-        "Final-year Computer Science project — *Detecting AI-Generated and "
-        "Cloned Voices: A Deep Learning System for Robust Audio Deepfake "
-        "Detection*."
-    )
-
-
-def _render_disclaimer() -> None:
-    st.info(
-        "**Research prototype.** This system is a research/educational "
-        "prototype and should not be treated as forensic evidence or used "
-        "as the sole basis for legal, security, disciplinary, or identity "
-        "decisions. Modern speech synthesis systems continue to evolve, and "
-        "detection performance can vary across recording conditions, "
-        "codecs, languages, and generation methods.",
-        icon=":material/info:",
-    )
-
-
-def _render_why_wav2vec2() -> None:
-    with st.expander("Why Wav2Vec2?"):
-        st.markdown(
-            """
-Wav2Vec2 is a self-supervised speech model that learns representations
-directly from raw waveform audio, rather than from hand-crafted spectral
-features. This project uses a checkpoint that adapts a pretrained
-Wav2Vec2 backbone for a bonafide-vs-spoof classification task.
-
-The system uses an existing **pretrained** model rather than training a
-speech foundation model from scratch — that would require substantially
-more data and compute than is practical for this project. Later phases of
-this project will independently evaluate how well this kind of detector
-generalises to unseen synthesis methods and how robust it is to
-real-world audio degradation.
-                """
-        )
+st.markdown(inject_global_styles(), unsafe_allow_html=True)
 
 
 def _render_technical_details(result, model_config, model_info: dict) -> None:
     """Built entirely from the ACTIVE detector's model_info() + model_config
     -- no model-specific string literals here, so this renders correctly
-    for whichever model_info dict DEPLOYMENT_MODEL_ID actually resolves to
-    (see candidate_e.py/candidate_b.py's model_info() for the fields read
-    below; docs/spectra_inconclusive_state.md Step 6/7)."""
+    for whichever model_info dict DEPLOYMENT_MODEL_ID actually resolves to."""
     display_name = model_info.get("display_name", model_info.get("model_id", "Unknown model"))
     architecture_short = model_info.get("architecture_short", model_config.architecture)
     runtime = model_info.get("runtime", "Unknown runtime")
@@ -99,17 +71,17 @@ def _render_technical_details(result, model_config, model_info: dict) -> None:
             ("Model", display_name),
             ("Base architecture", architecture_short),
             ("Runtime", runtime),
-            ("Repository", f"`{result.model_repository}`"),
-            ("Model revision", f"`{model_config.revision}`"),
+            ("Model artifact", f"`{result.model_repository}`"),
+            ("Revision", f"`{model_config.revision}`"),
             ("Input sample rate", f"{sample_rate} Hz"),
-            ("Native input window", native_window),
+            ("Native segment length", native_window),
             ("Device", result.device.upper()),
-            ("Windows analyzed", str(result.windows_analyzed)),
+            ("Segments analyzed", str(result.windows_analyzed)),
             ("Audio duration", f"{result.audio_duration_seconds:.2f} s"),
             ("Inference time", f"{result.inference_time_ms:.0f} ms"),
         ]
         if preemphasis is not None:
-            rows.append(("Pre-emphasis coefficient", str(preemphasis)))
+            rows.append(("Pre-emphasis", str(preemphasis)))
         if threshold_desc is not None:
             rows.append(("Decision threshold", threshold_desc))
 
@@ -117,37 +89,61 @@ def _render_technical_details(result, model_config, model_info: dict) -> None:
         st.markdown(f"| | |\n|---|---|\n{table}")
 
         st.caption(
-            "The detector operates on the audio waveform directly. The "
-            "spectrogram shown above is provided as a visual "
-            "representation for the user, not as model input."
+            "The detector operates on the audio waveform directly. The spectrogram shown "
+            "above is provided for visual inspection and is not the model input."
         )
         if aggregation_desc:
             st.caption(f"Aggregation method: {aggregation_desc}")
 
 
-def _render_window_table(result) -> None:
+def _render_segment_analysis(result) -> None:
     if result.windows_analyzed <= 1:
         return
-    st.caption(f"Windows analyzed: {result.windows_analyzed}")
-    with st.expander("Window-level analysis"):
-        st.dataframe(window_table_rows(result), use_container_width=True, hide_index=True)
+    from app.formatting import window_table_rows
+
+    rows = window_table_rows(result)
+    n_spoof_leaning = sum(1 for r in rows if r["Prediction"].startswith("Likely AI"))
+    n_bonafide_leaning = len(rows) - n_spoof_leaning
+
+    render_section_title(
+        "Segment analysis",
+        f"{len(rows)} segments analyzed &middot; {n_spoof_leaning} spoof-leaning &middot; "
+        f"{n_bonafide_leaning} bonafide-leaning",
+    )
+    with st.expander("View segment-level detail"):
+        st.dataframe(rows, use_container_width=True, hide_index=True)
+
+
+def _render_upload_privacy_note() -> None:
+    st.caption("Audio is analyzed for this session and is not permanently stored.")
+
+
+def _render_error(message: str) -> None:
+    st.error(message, icon=":material/error:")
 
 
 def main() -> None:
-    _render_header()
+    render_page_header()
 
     config = load_models_config()
     model_config = config.get(DEPLOYMENT_MODEL_ID)
 
     uploaded_file = st.file_uploader(
-        "Upload an audio clip (WAV, MP3, or FLAC — up to "
-        f"{MAX_DURATION_SECONDS:.0f} seconds, {MAX_FILE_SIZE_BYTES // (1024 * 1024)} MB max)",
+        f"Drop an audio sample here — WAV, MP3, or FLAC, up to "
+        f"{MAX_DURATION_SECONDS:.0f} seconds and {MAX_FILE_SIZE_BYTES // (1024 * 1024)} MB",
         type=["wav", "mp3", "flac"],
     )
 
     if uploaded_file is None:
-        _render_why_wav2vec2()
-        _render_disclaimer()
+        render_hero()
+        st.markdown("")
+        _render_upload_privacy_note()
+        st.divider()
+        render_how_it_works()
+        render_why_model()
+        render_evaluation_section()
+        render_disclaimer()
+        render_footer()
         return
 
     file_bytes = uploaded_file.getvalue()
@@ -156,41 +152,67 @@ def main() -> None:
     try:
         audio_sample = validate_and_load_upload(file_bytes, uploaded_file.name)
     except UserFacingError as exc:
-        st.error(exc.friendly_message)
+        _render_error(exc.friendly_message)
         if exc.technical_detail:
             logger.warning("Upload validation failed: %s", exc.technical_detail)
-        _render_why_wav2vec2()
-        _render_disclaimer()
+        render_disclaimer()
+        render_footer()
         return
 
-    st.subheader("Uploaded audio")
-    info_col1, info_col2, info_col3 = st.columns(3)
-    info_col1.metric("Filename", uploaded_file.name)
-    info_col2.metric("Duration", f"{audio_sample.duration_seconds:.2f} s")
-    info_col3.metric("Sample rate", f"{audio_sample.sample_rate} Hz")
-    st.audio(file_bytes)
+    _render_upload_privacy_note()
+
+    workspace_col, meta_col = st.columns([2, 1])
+    with workspace_col:
+        st.audio(file_bytes)
+    with meta_col:
+        st.markdown(
+            f"""
+| | |
+|---|---|
+| Filename | {uploaded_file.name} |
+| Duration | {audio_sample.duration_seconds:.2f} s |
+| Sample rate | {audio_sample.sample_rate} Hz |
+| Format | {Path(uploaded_file.name).suffix.lstrip('.').upper()} |
+| File size | {len(file_bytes) / 1024:.0f} KB |
+            """
+        )
 
     analyze_clicked = st.button("Analyze Audio", type="primary")
 
     if analyze_clicked:
-        try:
-            with st.spinner(
-                "Loading the detection model. The first analysis may take "
-                "longer while the model is prepared."
-            ):
+        detector = None
+        with st.status("Preparing detector...", expanded=False) as status:
+            try:
                 detector = get_detector(DEPLOYMENT_MODEL_ID)
+            except Exception:  # noqa: BLE001 - convert to friendly UI message
+                logger.exception("Model preparation failed")
+                status.update(label="Detector unavailable", state="error")
+                _render_error(
+                    "**Detector unavailable.** The analysis model could not be prepared. "
+                    "Please try again shortly."
+                )
+                render_disclaimer()
+                render_footer()
+                return
 
-            with st.spinner("Analyzing audio..."):
+            status.update(label="Processing audio...")
+            status.update(label="Running anti-spoof analysis...")
+            try:
                 result = detector.predict(audio_sample)
-        except Exception as exc:  # noqa: BLE001 - convert to friendly UI message
-            logger.exception("Inference failed")
-            st.error(
-                "Something went wrong while analyzing this audio. Please try "
-                "again, or try a different file. If the problem persists, "
-                "the detection model may be temporarily unavailable."
-            )
-            _render_disclaimer()
-            return
+            except Exception:  # noqa: BLE001 - convert to friendly UI message
+                logger.exception("Inference failed")
+                status.update(label="Analysis failed", state="error")
+                _render_error(
+                    "Something went wrong while analyzing this audio. Please try again, "
+                    "or try a different file."
+                )
+                render_disclaimer()
+                render_footer()
+                return
+
+            status.update(label="Combining segment results...")
+            status.update(label="Preparing visual analysis...")
+            status.update(label="Analysis complete", state="complete")
 
         st.session_state["last_result"] = result
         st.session_state["last_result_file_key"] = file_key
@@ -205,44 +227,69 @@ def main() -> None:
         model_info = detector_for_display.model_info()
         calibrated_threshold = model_info.get("calibrated_threshold_spoof_probability")
         summary = result_summary(result, calibrated_threshold=calibrated_threshold)
+        state = summary["presentation_state"]
 
-        st.subheader("Detection result")
-        col1, col2 = st.columns([2, 1])
-        with col1:
-            state = summary["presentation_state"]
-            if state == "SPOOF":
-                st.warning(f"**Prediction:** {summary['prediction']}")
-                st.caption("The model classifies this audio as likely AI-generated/spoofed.")
-            elif state == "INCONCLUSIVE":
-                st.info(f"**Prediction:** {summary['prediction']}")
-                st.caption(summary["inconclusive_explanation"])
-            else:
-                st.success(f"**Prediction:** {summary['prediction']}")
-                st.caption("The model classifies this audio as likely bonafide.")
-        with col2:
-            if summary["is_inconclusive"] and "calibrated_threshold" in summary:
-                st.metric("Calibrated spoof threshold", summary["calibrated_threshold"])
-            else:
-                st.metric(summary["confidence_label"], summary["confidence"])
+        extra_html = probability_comparison_html(result.probabilities["bonafide"], result.probabilities["spoof"])
+        if summary["is_inconclusive"] and calibrated_threshold is not None:
+            extra_html += threshold_visualization_html(result.probabilities["spoof"], calibrated_threshold)
 
-        prob_col1, prob_col2 = st.columns(2)
-        prob_col1.metric("Bonafide probability", summary["bonafide_probability"])
-        prob_col2.metric("Spoof probability", summary["spoof_probability"])
+        st.markdown("")
+        render_result_panel(state, summary["prediction"], _explanation_for_state(state), extra_html)
 
-        _render_window_table(result)
+        render_metrics_row(
+            [
+                (f"{result.audio_duration_seconds:.1f} sec", "Audio duration"),
+                (str(result.windows_analyzed), "Segments analyzed"),
+                (f"{result.inference_time_ms / 1000:.1f} sec", "Analysis time"),
+                ("CPU / ONNX", "Runtime"),
+            ]
+        )
 
-        st.subheader("Waveform")
-        waveform_fig = plot_waveform(audio_sample.waveform, audio_sample.sample_rate)
-        st.pyplot(waveform_fig, clear_figure=True)
+        _render_segment_analysis(result)
 
-        st.subheader("Mel spectrogram")
-        spectrogram_fig = plot_mel_spectrogram(audio_sample.waveform, audio_sample.sample_rate)
-        st.pyplot(spectrogram_fig, clear_figure=True)
+        st.divider()
+        render_section_title(
+            "Audio characteristics", "Visual representations of the submitted waveform and spectral content."
+        )
+        viz_col1, viz_col2 = st.columns(2)
+        with viz_col1:
+            st.caption("Waveform")
+            waveform_fig = plot_waveform(audio_sample.waveform, audio_sample.sample_rate)
+            st.pyplot(waveform_fig, clear_figure=True)
+        with viz_col2:
+            st.caption("Mel spectrogram")
+            spectrogram_fig = plot_mel_spectrogram(audio_sample.waveform, audio_sample.sample_rate)
+            st.pyplot(spectrogram_fig, clear_figure=True)
+        st.caption(
+            "The detector operates on waveform audio directly. This spectrogram is shown for "
+            "visual inspection and is not the model input."
+        )
 
+        st.divider()
+        render_how_it_works()
+        render_why_model()
+        render_evaluation_section()
         _render_technical_details(result, model_config, model_info)
 
-    _render_why_wav2vec2()
-    _render_disclaimer()
+    render_disclaimer()
+    render_footer()
+
+
+def _explanation_for_state(state: str) -> str:
+    if state == "SPOOF":
+        return (
+            "The analyzed speech contains characteristics the detector associates with "
+            "synthetic or spoofed audio."
+        )
+    if state == "INCONCLUSIVE":
+        return (
+            "The detector found elevated spoof indicators, but the score did not cross the "
+            "calibrated spoof threshold."
+        )
+    return (
+        "The analyzed speech is more consistent with genuine human speech under the model's "
+        "calibrated operating threshold."
+    )
 
 
 if __name__ == "__main__":
