@@ -195,4 +195,7 @@ docs/                                Design, planning, and model-candidate docum
 - [`docs/cpu_model_benchmark.md`](docs/cpu_model_benchmark.md) — measured CPU engineering benchmarks
 - [`docs/streamlit_mvp.md`](docs/streamlit_mvp.md) — Streamlit MVP architecture and behavior
 - [`docs/deployment.md`](docs/deployment.md) — Streamlit Community Cloud deployment notes
+- [`docs/spectra_aasist3_evaluation.md`](docs/spectra_aasist3_evaluation.md) — Spectra-AASIST3 generalization evaluation vs. the deployed model
+- [`docs/spectra_production_optimization.md`](docs/spectra_production_optimization.md) — INT8 quantization of Spectra-AASIST3 for CPU deployment
+- [`docs/spectra_streamlit_candidate.md`](docs/spectra_streamlit_candidate.md) — experimental second Streamlit candidate using the INT8 model (branch `feat/spectra-streamlit-candidate`; not yet deployed, blocked on Hugging Face publishing)
 - [`CLAUDE.md`](CLAUDE.md) — development rules for AI-assisted work in this repo

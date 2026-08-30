@@ -1,17 +1,21 @@
 # Root-level requirements.txt for Streamlit Community Cloud.
 #
+# EXPERIMENTAL CANDIDATE BRANCH (feat/spectra-streamlit-candidate): this
+# file is intentionally DIFFERENT from main's requirements.txt. The
+# production path on this branch is spectra_aasist3_onnx_int8 (ONNX
+# Runtime CPU only) -- it does NOT need torch/torchaudio/transformers/
+# safetensors, so they are deliberately NOT listed here. Those packages
+# remain real project dependencies for the research adapters
+# (candidate_a/b/c.py -- Sara, CAA, the blocked AntiDeepfake candidate),
+# which are still fully present in src/audio_deepfake_detector/models/ and
+# still installable via `pip install -e ".[dev]"` for local research work;
+# they are simply not imported by this branch's deployed Streamlit path
+# (see docs/spectra_streamlit_candidate.md, "Dependency audit").
+#
 # Community Cloud runs Debian Linux and installs this file directly with
-# pip. The --extra-index-url below points pip at the official CPU-only
-# PyTorch wheel index so it resolves the "+cpu" build instead of a CUDA
-# build (CUDA wheels are much larger and entirely unnecessary here — this
-# project never uses a GPU in production).
---extra-index-url https://download.pytorch.org/whl/cpu
-
-torch==2.13.0+cpu
-torchaudio==2.11.0+cpu
-transformers==5.15.1
+# pip.
 huggingface_hub==1.28.0
-safetensors==0.8.0
+onnxruntime==1.29.0
 numpy==2.5.2
 scipy==1.18.1
 soundfile==0.14.0
