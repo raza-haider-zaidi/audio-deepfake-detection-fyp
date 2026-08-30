@@ -199,6 +199,7 @@ models:
     window_samples: 64600
     checkpoint_filename: spectra-aasist3.onnx
     checkpoint_size_bytes: 1279022864
+    expected_sha256: 5f05c29a01ad80c702b32654db87c2aa6e467c11c67b6d47f2fac873f846cae9
     label_mapping:
       0: spoof
       1: bonafide
@@ -259,8 +260,8 @@ models:
 
   spectra_aasist3_onnx_int8:
     id: spectra_aasist3_onnx_int8
-    repository: lab260/Spectra-AASIST3
-    revision: bc0ded888080ddad493177bb53aa6f5b95219d7c
+    repository: PENDING_HF_PUBLISH  # placeholder -- see docs/spectra_streamlit_candidate.md Step 4-9; NOT a real, resolvable HF repo yet. Update to <HF_USERNAME>/spectra-aasist3-int8-audio-deepfake once published.
+    revision: PENDING_HF_PUBLISH  # placeholder -- update to the exact HF commit SHA once uploaded
     enabled: false
     architecture: "Dynamic INT8 weight-quantized (onnxruntime.quantization.quantize_dynamic, MatMul-only, QInt8, per_channel=False) export of spectra_aasist3_onnx's FP32 ONNX graph. Same wav2vec2 XLS-R-300m + MLP bridge + KAN-AASIST architecture; 351 of 417 MatMul nodes converted to MatMulInteger, 66 MatMul + all 24 Conv nodes remain fp32."
     base_model: facebook/wav2vec2-xls-r-300m
@@ -269,6 +270,7 @@ models:
     window_samples: 64600
     checkpoint_filename: spectra-aasist3-int8-dynamic.onnx
     checkpoint_size_bytes: 364036647
+    expected_sha256: 444f832d306a2be4f823119f84e698e8821db6a1aab248593d4b05b7a9a48108
     label_mapping:
       0: spoof
       1: bonafide

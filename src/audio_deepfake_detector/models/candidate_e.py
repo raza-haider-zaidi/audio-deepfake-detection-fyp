@@ -56,6 +56,7 @@ reusing this project's existing `evaluation/metrics.py` (which expects a
 
 from __future__ import annotations
 
+import hashlib
 import time
 
 import numpy as np
@@ -78,6 +79,14 @@ AUTHOR_DEFAULT_THRESHOLD = -1.0625009  # from model.py SpectraAASIST3.classify()
 # NEVER selected on the evaluation set. See docs/spectra_production_optimization.md.
 FP32_CALIBRATED_THRESHOLD = 0.9299831390380859
 INT8_DYNAMIC_CALIBRATED_THRESHOLD = 0.939693808555603
+
+
+def _sha256_of_file(path: str, chunk_size: int = 1 << 20) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(chunk_size), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def apply_preemphasis(waveform: np.ndarray, coeff: float = PREEMPHASIS_COEFF) -> np.ndarray:
@@ -159,13 +168,17 @@ class CandidateSpectraAasist3OnnxDetector(BaseDeepfakeDetector):
         self._output_name: str | None = None
         self._input_length: int | None = None
         self._label_mapping = model_config.label_mapping or {0: "spoof", 1: "bonafide"}
-        # Calibrated decision threshold (spoof-probability convention). Defaults to the
-        # FP32 calibration result; callers score with INT8_DYNAMIC_CALIBRATED_THRESHOLD
-        # explicitly when using the quantized artifact (see production adapter notes in
-        # docs/spectra_production_optimization.md -- there is currently no single
-        # "quantization" field on ModelConfig, so the caller is responsible for passing
-        # the threshold matching whichever artifact `local_onnx_path` points at).
-        self.threshold = FP32_CALIBRATED_THRESHOLD
+        # Calibrated decision threshold (spoof-probability convention), selected
+        # automatically from the model_id so callers never have to remember which
+        # artifact needs which threshold -- see docs/spectra_production_optimization.md
+        # (FP32_CALIBRATED_THRESHOLD) and docs/spectra_streamlit_candidate.md
+        # (INT8_DYNAMIC_CALIBRATED_THRESHOLD, frozen on the SAME calibration split,
+        # NEVER the FP32 threshold).
+        self.threshold = (
+            INT8_DYNAMIC_CALIBRATED_THRESHOLD
+            if model_config.id == "spectra_aasist3_onnx_int8"
+            else FP32_CALIBRATED_THRESHOLD
+        )
 
     def load(self, local_onnx_path: str | None = None) -> ModelLoadMetadata:
         """`local_onnx_path`: load a local ONNX file (e.g. a quantized
@@ -177,7 +190,19 @@ class CandidateSpectraAasist3OnnxDetector(BaseDeepfakeDetector):
         parameter exists so the same adapter class can be pointed at it
         locally without inventing a second adapter class."""
         import onnxruntime as ort
-        import torch
+
+        # torch is NOT a production dependency of this ONNX-only adapter --
+        # it is imported here only if already present (e.g. in a dev/research
+        # environment where other adapters need it), purely to report its
+        # version string in ModelLoadMetadata. On the Streamlit Cloud
+        # deployment path (no torch in requirements.txt, see
+        # docs/spectra_streamlit_candidate.md) this must NOT raise.
+        try:
+            import torch
+
+            torch_version = torch.__version__
+        except ImportError:
+            torch_version = "not installed (ONNX-only production path)"
 
         if local_onnx_path is not None:
             ckpt_path = local_onnx_path
@@ -189,6 +214,16 @@ class CandidateSpectraAasist3OnnxDetector(BaseDeepfakeDetector):
                 filename=self.model_config.checkpoint_filename,
                 revision=self.model_config.revision,
             )
+
+        if self.model_config.expected_sha256:
+            actual_sha256 = _sha256_of_file(ckpt_path)
+            if actual_sha256 != self.model_config.expected_sha256:
+                raise RuntimeError(
+                    f"SHA256 integrity check failed for {ckpt_path}: expected "
+                    f"{self.model_config.expected_sha256}, got {actual_sha256}. "
+                    "Refusing to load a checkpoint that does not match the pinned "
+                    "hash -- see docs/spectra_streamlit_candidate.md."
+                )
 
         session_options = ort.SessionOptions()
         session_options.intra_op_num_threads = 2  # see docs/spectra_production_optimization.md Step 11
@@ -231,7 +266,7 @@ class CandidateSpectraAasist3OnnxDetector(BaseDeepfakeDetector):
             sample_rate=self.sample_rate,
             window_seconds=self.window_seconds,
             label_mapping=self._label_mapping,
-            torch_version=torch.__version__,
+            torch_version=torch_version,
             transformers_version=None,
             device=self.device,
         )
@@ -260,7 +295,10 @@ class CandidateSpectraAasist3OnnxDetector(BaseDeepfakeDetector):
 
         spoof_prob, bonafide_prob = softmax_spoof_bonafide(logits)
         prob_dict = {"spoof": spoof_prob, "bonafide": bonafide_prob}
-        raw_label = "spoof" if spoof_prob >= bonafide_prob else "bonafide"
+        # Decision uses the calibrated operating threshold (self.threshold),
+        # NOT a naive 0.5 softmax split -- see docs/spectra_production_optimization.md
+        # (calibration derives 0.93/0.94-range thresholds, not 0.5).
+        raw_label = "spoof" if spoof_prob >= self.threshold else "bonafide"
 
         window_predictions = [
             WindowPrediction(
@@ -340,6 +378,8 @@ class CandidateSpectraAasist3OnnxDetector(BaseDeepfakeDetector):
             "label_mapping": self._label_mapping,
             "device": self.device,
             "loaded": self._session is not None,
+            "calibrated_threshold_spoof_probability": self.threshold,
+            "expected_sha256": self.model_config.expected_sha256,
             "author_default_threshold_on_bonafide_logit": AUTHOR_DEFAULT_THRESHOLD,
             "unpublished_model": True,
         }

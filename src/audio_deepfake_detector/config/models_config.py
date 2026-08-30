@@ -35,6 +35,7 @@ class ModelConfig:
     notes: str = ""
     window_hop_samples: int | None = None
     window_samples: int | None = None
+    expected_sha256: str | None = None
 
 
 @dataclass
@@ -86,6 +87,7 @@ def load_models_config(path: Path | str = DEFAULT_CONFIG_PATH) -> ModelsRegistry
             notes=(entry.get("notes") or "").strip(),
             window_hop_samples=entry.get("window_hop_samples"),
             window_samples=entry.get("window_samples"),
+            expected_sha256=entry.get("expected_sha256"),
         )
 
     return ModelsRegistryConfig(models=models)

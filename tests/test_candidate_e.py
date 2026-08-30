@@ -176,6 +176,33 @@ def test_default_threshold_is_fp32_calibrated_value():
     assert detector.threshold == FP32_CALIBRATED_THRESHOLD
 
 
+def test_int8_detector_automatically_uses_int8_threshold_not_fp32():
+    detector = create_detector("spectra_aasist3_onnx_int8", device="cpu")
+    assert detector.threshold == INT8_DYNAMIC_CALIBRATED_THRESHOLD
+    assert detector.threshold != FP32_CALIBRATED_THRESHOLD
+
+
+def test_expected_sha256_wired_from_config():
+    config = load_models_config()
+    fp32 = config.get("spectra_aasist3_onnx")
+    int8 = config.get("spectra_aasist3_onnx_int8")
+    assert fp32.expected_sha256 == "5f05c29a01ad80c702b32654db87c2aa6e467c11c67b6d47f2fac873f846cae9"
+    assert int8.expected_sha256 == "444f832d306a2be4f823119f84e698e8821db6a1aab248593d4b05b7a9a48108"
+
+
+def test_load_rejects_local_file_with_wrong_sha256(tmp_path):
+    """Integrity check (Step 10): load() must refuse to load a file whose
+    SHA256 does not match model_config.expected_sha256, even for a
+    local_onnx_path override. Fails fast on the SHA mismatch, before ever
+    reaching onnxruntime -- no network access, no real model needed."""
+    bad_file = tmp_path / "not-the-real-model.onnx"
+    bad_file.write_bytes(b"this is not an onnx file")
+
+    detector = create_detector("spectra_aasist3_onnx", device="cpu")
+    with pytest.raises(RuntimeError, match="SHA256"):
+        detector.load(local_onnx_path=str(bad_file))
+
+
 def test_fp32_and_int8_calibrated_thresholds_are_distinct_and_frozen():
     # Both values are frozen calibration results (results/metrics/spectra_aasist3_calibration.json,
     # spectra_int8_calibration.json) -- this test guards against accidental edits drifting

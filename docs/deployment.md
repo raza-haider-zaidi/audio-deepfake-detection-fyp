@@ -136,3 +136,15 @@ actual deployment time, not before.
 - The app has not been deployed to Streamlit Community Cloud.
 - Actual Streamlit Cloud CPU/RAM/cold-start behavior has not been measured
   and should not be assumed to match the local figures above.
+
+## Second, experimental candidate deployment
+
+`sara_wav2vec2` remains this document's (and `main`'s) deployment model.
+A separate, **temporary** second Streamlit app candidate — using an
+INT8-quantized `spectra_aasist3_onnx_int8` instead — is being prepared on
+branch `feat/spectra-streamlit-candidate`, purely for validation. It does
+not replace anything described above and `main` is untouched. See
+`docs/spectra_production_optimization.md` for why Spectra-AASIST3 was
+investigated, and `docs/spectra_streamlit_candidate.md` for that branch's
+architecture, dependency changes, and current status (blocked on manual
+Hugging Face authentication as of this writing).
