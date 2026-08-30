@@ -153,6 +153,36 @@ def softmax_spoof_bonafide(logits: np.ndarray) -> tuple[float, float]:
     return float(probs[0]), float(probs[1])
 
 
+def decide_label(spoof_prob: float, threshold: float) -> str:
+    """THE single authoritative deployment decision rule for this adapter.
+
+    Returns "spoof" if spoof_prob >= threshold else "bonafide".
+
+    This is deliberately the SAME quantity and comparison direction used by
+    the frozen calibration/evaluation pipeline
+    (scripts/run_spectra_int8_evaluation.py: `score_clip()` returns
+    `spoof_prob` from `softmax_spoof_bonafide()`, and
+    `compute_eer`/`compute_threshold_metrics` in
+    evaluation/metrics.py treat any score `>= threshold` as the positive
+    (spoof) class) -- verified directly from that source, not assumed. The
+    calibrated thresholds (FP32_CALIBRATED_THRESHOLD,
+    INT8_DYNAMIC_CALIBRATED_THRESHOLD) are therefore thresholds on
+    `spoof_prob` (a softmax value), NOT on the raw bona-fide logit --
+    see docs/spectra_prediction_semantics_fix.md for the full trace and why
+    an earlier assumption to the contrary was incorrect.
+
+    Because the calibrated threshold for a low-bonafide-FPR operating point
+    sits well above 0.5, a clip can have spoof_prob > 0.5 (i.e. a naive
+    50/50 softmax argmax would call it "spoof") while this function still
+    returns "bonafide" -- that is not a bug, it is the calibrated,
+    low-false-positive-rate decision working as measured (see the frozen
+    evaluation's own spoof_fnr=10%). Callers must not derive the binary
+    label any other way (e.g. from softmax argmax) -- this function is the
+    single source of truth for the deployment decision.
+    """
+    return "spoof" if spoof_prob >= threshold else "bonafide"
+
+
 class CandidateSpectraAasist3OnnxDetector(BaseDeepfakeDetector):
     def __init__(self, model_config: ModelConfig, device: str = "cpu"):
         if device != "cpu":
@@ -295,10 +325,10 @@ class CandidateSpectraAasist3OnnxDetector(BaseDeepfakeDetector):
 
         spoof_prob, bonafide_prob = softmax_spoof_bonafide(logits)
         prob_dict = {"spoof": spoof_prob, "bonafide": bonafide_prob}
-        # Decision uses the calibrated operating threshold (self.threshold),
-        # NOT a naive 0.5 softmax split -- see docs/spectra_production_optimization.md
-        # (calibration derives 0.93/0.94-range thresholds, not 0.5).
-        raw_label = "spoof" if spoof_prob >= self.threshold else "bonafide"
+        # decide_label() is the SINGLE authoritative deployment decision --
+        # verified identical to the frozen calibration/evaluation rule, see
+        # its own docstring and docs/spectra_prediction_semantics_fix.md.
+        raw_label = decide_label(spoof_prob, self.threshold)
 
         window_predictions = [
             WindowPrediction(

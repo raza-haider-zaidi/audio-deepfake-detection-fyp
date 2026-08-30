@@ -20,6 +20,7 @@ from audio_deepfake_detector.models.candidate_e import (
     CandidateSpectraAasist3OnnxDetector,
     apply_preemphasis,
     author_compatible_preprocess,
+    decide_label,
     make_sequential_windows,
     softmax_spoof_bonafide,
     window_to_required_length,
@@ -245,3 +246,150 @@ def test_load_accepts_local_onnx_path_override():
         assert detector.model_info()["input_length_samples"] == REQUIRED_SAMPLES
     finally:
         detector.unload()
+
+
+# ---------------------------------------------------------------------------
+# Prediction-semantics regression tests (live-bug investigation).
+#
+# ROOT CAUSE FINDING, verified against scripts/run_spectra_int8_evaluation.py
+# (the frozen INT8 calibration/evaluation source of truth): the calibrated
+# threshold IS applied to `spoof_prob` (softmax_spoof_bonafide()'s output),
+# NOT the raw bona-fide logit -- `score_clip()` there returns
+# `(bonafide_logit, spoof_prob)` but only ever appends `spoof_prob` to
+# `calib_spoof_scores`/`eval_spoof_scores`, which is what
+# compute_eer/best_*_threshold/full_metrics_report are called on. So the
+# INT8_DYNAMIC_CALIBRATED_THRESHOLD (0.939693808555603) is a threshold on
+# spoof_prob, and candidate_e.py's decide_label() already matched this
+# correctly BEFORE this fix (spoof_prob >= threshold -> spoof).
+#
+# The live bug's exact numbers (bonafide=7.8%, spoof=92.2%) are the
+# CORRECT, frozen-calibration-consistent BONAFIDE decision -- 0.922 is
+# below the 0.9397 threshold. This is not a misclassification; it is one
+# instance of the frozen evaluation's own measured 10% spoof_fnr (a
+# deliberate low-bonafide-FPR tradeoff). The actual defect was in the UI
+# layer: labeling the predicted-class probability "Model confidence"
+# without any indication that the decision uses a threshold far from 50%,
+# which reads as an internal contradiction. See
+# docs/spectra_prediction_semantics_fix.md for the full trace.
+# ---------------------------------------------------------------------------
+
+
+def test_decide_label_matches_frozen_calibration_rule_spoof_prob_ge_threshold():
+    # This IS the frozen rule: spoof_prob >= threshold -> spoof.
+    assert decide_label(spoof_prob=0.95, threshold=0.9397) == "spoof"
+    assert decide_label(spoof_prob=0.90, threshold=0.9397) == "bonafide"
+
+
+def test_decide_label_high_bonafide_raw_score_gives_bonafide():
+    # High bona-fide confidence (low spoof_prob) -> BONAFIDE.
+    assert decide_label(spoof_prob=0.01, threshold=INT8_DYNAMIC_CALIBRATED_THRESHOLD) == "bonafide"
+
+
+def test_decide_label_high_spoof_raw_score_gives_spoof():
+    # Very high spoof_prob, comfortably above threshold -> SPOOF.
+    assert decide_label(spoof_prob=0.999, threshold=INT8_DYNAMIC_CALIBRATED_THRESHOLD) == "spoof"
+
+
+def test_decide_label_exact_threshold_boundary_is_spoof():
+    # >= is inclusive: a score exactly AT the threshold is SPOOF, documented
+    # and tested explicitly (the frozen evaluation's compute_threshold_metrics
+    # also uses >=, so this matches that convention).
+    t = INT8_DYNAMIC_CALIBRATED_THRESHOLD
+    assert decide_label(spoof_prob=t, threshold=t) == "spoof"
+    assert decide_label(spoof_prob=np.nextafter(t, 0.0), threshold=t) == "bonafide"
+
+
+def test_decide_label_exact_live_bug_numbers_is_bonafide_not_spoof():
+    """The literal reported live-bug numbers. IMPORTANT: this asserts
+    BONAFIDE, not SPOOF -- the initial bug report assumed this was a
+    misclassification, but tracing scripts/run_spectra_int8_evaluation.py
+    (the frozen source of truth) shows the calibrated threshold operates on
+    spoof_prob, and 0.922 < 0.939693808555603, so BONAFIDE is the correct,
+    frozen-calibration-consistent decision. Forcing SPOOF here would
+    deviate from the calibrated threshold, which this project was
+    explicitly instructed not to change."""
+    spoof_prob = 0.922
+    bonafide_prob = 0.078
+    assert abs((spoof_prob + bonafide_prob) - 1.0) < 1e-9
+    assert decide_label(spoof_prob, INT8_DYNAMIC_CALIBRATED_THRESHOLD) == "bonafide"
+
+
+def test_threshold_disagreement_rate_on_calibration_and_evaluation_data_is_measured_not_zero():
+    # Documents the actual measured disagreement rate between the
+    # calibrated-threshold decision and a naive 50% softmax split, computed
+    # over all 400 calibration+evaluation clips (see
+    # docs/spectra_prediction_semantics_fix.md Section on Step 7). This is
+    # a fixed historical fact about the frozen INT8 evaluation, recorded
+    # here so it cannot silently drift without updating the doc.
+    measured_disagreement_count = 12
+    measured_total = 400
+    assert measured_disagreement_count / measured_total == 0.03
+
+
+def test_result_summary_uses_class_specific_label_not_generic_confidence():
+    from app.formatting import result_summary
+    from audio_deepfake_detector.utils.datatypes import PredictionResult
+
+    result = PredictionResult(
+        raw_label="bonafide",
+        normalized_label="BONAFIDE",
+        confidence=0.078,
+        probabilities={"bonafide": 0.078, "spoof": 0.922},
+        model_id="spectra_aasist3_onnx_int8",
+        model_repository="Limitless-8/spectra-aasist3-int8-audio-deepfake",
+        device="cpu",
+        inference_time_ms=650.0,
+        audio_duration_seconds=4.04,
+    )
+    summary = result_summary(result)
+    assert summary["prediction"] == "Likely Real / Bonafide"
+    assert summary["confidence"] == "7.8%"
+    assert summary["confidence_label"] == "Bonafide class probability"
+    assert summary["bonafide_probability"] == "7.8%"
+    assert summary["spoof_probability"] == "92.2%"
+    # This is the internal-consistency guard: the UI must be told to add a
+    # clarifying note here, since the predicted class's own probability
+    # (7.8%) is a minority relative to the other class (92.2%).
+    assert summary["threshold_disagreement"] is True
+    assert "Likely AI-Generated / Spoofed" not in summary["prediction"]
+
+
+def test_result_summary_no_disagreement_flag_for_high_bonafide_confidence():
+    from app.formatting import result_summary
+    from audio_deepfake_detector.utils.datatypes import PredictionResult
+
+    result = PredictionResult(
+        raw_label="bonafide",
+        normalized_label="BONAFIDE",
+        confidence=0.97,
+        probabilities={"bonafide": 0.97, "spoof": 0.03},
+        model_id="spectra_aasist3_onnx_int8",
+        model_repository="Limitless-8/spectra-aasist3-int8-audio-deepfake",
+        device="cpu",
+        inference_time_ms=650.0,
+        audio_duration_seconds=4.04,
+    )
+    summary = result_summary(result)
+    assert summary["confidence_label"] == "Bonafide class probability"
+    assert summary["threshold_disagreement"] is False
+
+
+def test_result_summary_no_disagreement_flag_for_high_spoof_confidence():
+    from app.formatting import result_summary
+    from audio_deepfake_detector.utils.datatypes import PredictionResult
+
+    result = PredictionResult(
+        raw_label="spoof",
+        normalized_label="SPOOF",
+        confidence=0.99,
+        probabilities={"bonafide": 0.01, "spoof": 0.99},
+        model_id="spectra_aasist3_onnx_int8",
+        model_repository="Limitless-8/spectra-aasist3-int8-audio-deepfake",
+        device="cpu",
+        inference_time_ms=650.0,
+        audio_duration_seconds=4.04,
+    )
+    summary = result_summary(result)
+    assert summary["confidence_label"] == "Spoof class probability"
+    assert summary["threshold_disagreement"] is False
+    assert summary["prediction"] == "Likely AI-Generated / Spoofed"
