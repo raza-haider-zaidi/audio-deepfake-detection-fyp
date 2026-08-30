@@ -79,36 +79,50 @@ real-world audio degradation.
         )
 
 
-def _render_technical_details(result, model_config) -> None:
+def _render_technical_details(result, model_config, model_info: dict) -> None:
+    """Built entirely from the ACTIVE detector's model_info() + model_config
+    -- no model-specific string literals here, so this renders correctly
+    for whichever model_info dict DEPLOYMENT_MODEL_ID actually resolves to
+    (see candidate_e.py/candidate_b.py's model_info() for the fields read
+    below; docs/spectra_inconclusive_state.md Step 6/7)."""
+    display_name = model_info.get("display_name", model_info.get("model_id", "Unknown model"))
+    architecture_short = model_info.get("architecture_short", model_config.architecture)
+    runtime = model_info.get("runtime", "Unknown runtime")
+    sample_rate = model_info.get("sample_rate", 16000)
+    native_window = model_info.get("native_window_description", f"{model_info.get('window_seconds', '?')} seconds")
+    threshold_desc = model_info.get("threshold_description")
+    aggregation_desc = model_info.get("aggregation_description")
+    preemphasis = model_info.get("preemphasis_coefficient")
+
     with st.expander("Technical details"):
-        st.markdown(
-            f"""
-| | |
-|---|---|
-| Model | Wav2Vec2 Audio Deepfake Detector |
-| Repository | `{result.model_repository}` |
-| Base architecture | `facebook/wav2vec2-base` |
-| Input sample rate | 16 kHz |
-| Window | 4 seconds |
-| Device | {result.device.upper()} |
-| Windows analyzed | {result.windows_analyzed} |
-| Audio duration | {result.audio_duration_seconds:.2f} s |
-| Inference time | {result.inference_time_ms:.0f} ms |
-| Model revision | `{model_config.revision}` |
-            """
-        )
+        rows = [
+            ("Model", display_name),
+            ("Base architecture", architecture_short),
+            ("Runtime", runtime),
+            ("Repository", f"`{result.model_repository}`"),
+            ("Model revision", f"`{model_config.revision}`"),
+            ("Input sample rate", f"{sample_rate} Hz"),
+            ("Native input window", native_window),
+            ("Device", result.device.upper()),
+            ("Windows analyzed", str(result.windows_analyzed)),
+            ("Audio duration", f"{result.audio_duration_seconds:.2f} s"),
+            ("Inference time", f"{result.inference_time_ms:.0f} ms"),
+        ]
+        if preemphasis is not None:
+            rows.append(("Pre-emphasis coefficient", str(preemphasis)))
+        if threshold_desc is not None:
+            rows.append(("Decision threshold", threshold_desc))
+
+        table = "\n".join(f"| {label} | {value} |" for label, value in rows)
+        st.markdown(f"| | |\n|---|---|\n{table}")
+
         st.caption(
-            "The Wav2Vec2 detector operates on the audio waveform directly. "
-            "The spectrogram shown above is provided as a visual "
+            "The detector operates on the audio waveform directly. The "
+            "spectrogram shown above is provided as a visual "
             "representation for the user, not as model input."
         )
-        st.caption(
-            "Aggregation method: when a clip spans more than one 4-second "
-            "window, the clip-level result is the mean spoof probability "
-            "across all windows. This is a project-level aggregation "
-            "choice for this MVP, not a method scientifically validated by "
-            "the original model authors."
-        )
+        if aggregation_desc:
+            st.caption(f"Aggregation method: {aggregation_desc}")
 
 
 def _render_window_table(result) -> None:
@@ -187,37 +201,33 @@ def main() -> None:
         else None
     )
     if result is not None:
-        summary = result_summary(result)
+        detector_for_display = get_detector(DEPLOYMENT_MODEL_ID)
+        model_info = detector_for_display.model_info()
+        calibrated_threshold = model_info.get("calibrated_threshold_spoof_probability")
+        summary = result_summary(result, calibrated_threshold=calibrated_threshold)
+
         st.subheader("Detection result")
         col1, col2 = st.columns([2, 1])
         with col1:
-            if result.normalized_label == "SPOOF":
+            state = summary["presentation_state"]
+            if state == "SPOOF":
                 st.warning(f"**Prediction:** {summary['prediction']}")
+                st.caption("The model classifies this audio as likely AI-generated/spoofed.")
+            elif state == "INCONCLUSIVE":
+                st.info(f"**Prediction:** {summary['prediction']}")
+                st.caption(summary["inconclusive_explanation"])
             else:
                 st.success(f"**Prediction:** {summary['prediction']}")
-            st.caption(
-                "The model classifies this audio as "
-                + (
-                    "likely AI-generated/spoofed."
-                    if result.normalized_label == "SPOOF"
-                    else "likely bonafide."
-                )
-            )
+                st.caption("The model classifies this audio as likely bonafide.")
         with col2:
-            st.metric(summary["confidence_label"], summary["confidence"])
+            if summary["is_inconclusive"] and "calibrated_threshold" in summary:
+                st.metric("Calibrated spoof threshold", summary["calibrated_threshold"])
+            else:
+                st.metric(summary["confidence_label"], summary["confidence"])
 
         prob_col1, prob_col2 = st.columns(2)
         prob_col1.metric("Bonafide probability", summary["bonafide_probability"])
         prob_col2.metric("Spoof probability", summary["spoof_probability"])
-
-        if summary["threshold_disagreement"]:
-            st.caption(
-                "This model's deployment decision uses a calibrated threshold "
-                "chosen to minimize false alarms on genuine speech, not a "
-                "simple 50/50 split -- so the predicted class can have a "
-                "class probability below 50% while still being the correct "
-                "calibrated decision for this clip."
-            )
 
         _render_window_table(result)
 
@@ -229,7 +239,7 @@ def main() -> None:
         spectrogram_fig = plot_mel_spectrogram(audio_sample.waveform, audio_sample.sample_rate)
         st.pyplot(spectrogram_fig, clear_figure=True)
 
-        _render_technical_details(result, model_config)
+        _render_technical_details(result, model_config, model_info)
 
     _render_why_wav2vec2()
     _render_disclaimer()
