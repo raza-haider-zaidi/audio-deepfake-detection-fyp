@@ -204,11 +204,20 @@ def main() -> None:
                 )
             )
         with col2:
-            st.metric("Model confidence", summary["confidence"])
+            st.metric(summary["confidence_label"], summary["confidence"])
 
         prob_col1, prob_col2 = st.columns(2)
         prob_col1.metric("Bonafide probability", summary["bonafide_probability"])
         prob_col2.metric("Spoof probability", summary["spoof_probability"])
+
+        if summary["threshold_disagreement"]:
+            st.caption(
+                "This model's deployment decision uses a calibrated threshold "
+                "chosen to minimize false alarms on genuine speech, not a "
+                "simple 50/50 split -- so the predicted class can have a "
+                "class probability below 50% while still being the correct "
+                "calibrated decision for this clip."
+            )
 
         _render_window_table(result)
 
