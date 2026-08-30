@@ -22,6 +22,7 @@ from audio_deepfake_detector.models.candidate_e import (
     author_compatible_preprocess,
     decide_label,
     make_sequential_windows,
+    presentation_state,
     softmax_spoof_bonafide,
     window_to_required_length,
 )
@@ -326,11 +327,10 @@ def test_threshold_disagreement_rate_on_calibration_and_evaluation_data_is_measu
     assert measured_disagreement_count / measured_total == 0.03
 
 
-def test_result_summary_uses_class_specific_label_not_generic_confidence():
-    from app.formatting import result_summary
+def _make_spectra_result(**overrides):
     from audio_deepfake_detector.utils.datatypes import PredictionResult
 
-    result = PredictionResult(
+    defaults = dict(
         raw_label="bonafide",
         normalized_label="BONAFIDE",
         confidence=0.078,
@@ -340,56 +340,212 @@ def test_result_summary_uses_class_specific_label_not_generic_confidence():
         device="cpu",
         inference_time_ms=650.0,
         audio_duration_seconds=4.04,
+        binary_model_decision="bonafide",
+        presentation_state="INCONCLUSIVE",
     )
-    summary = result_summary(result)
-    assert summary["prediction"] == "Likely Real / Bonafide"
-    assert summary["confidence"] == "7.8%"
-    assert summary["confidence_label"] == "Bonafide class probability"
+    defaults.update(overrides)
+    return PredictionResult(**defaults)
+
+
+def test_result_summary_exact_live_bug_numbers_is_inconclusive_not_bonafide_or_spoof():
+    """The exact reported live-bug numbers (bonafide=7.8%, spoof=92.2%).
+    The BINARY decision remains bonafide (verified correct per
+    docs/spectra_prediction_semantics_fix.md), but the PRESENTATION state
+    is now INCONCLUSIVE -- this is the fix for the reported UI confusion."""
+    from app.formatting import result_summary
+
+    result = _make_spectra_result()
+    summary = result_summary(result, calibrated_threshold=INT8_DYNAMIC_CALIBRATED_THRESHOLD)
+    assert summary["prediction"] == "Inconclusive / Mixed Evidence"
+    assert summary["is_inconclusive"] is True
     assert summary["bonafide_probability"] == "7.8%"
     assert summary["spoof_probability"] == "92.2%"
-    # This is the internal-consistency guard: the UI must be told to add a
-    # clarifying note here, since the predicted class's own probability
-    # (7.8%) is a minority relative to the other class (92.2%).
-    assert summary["threshold_disagreement"] is True
+    assert summary["observed_spoof_probability"] == "92.2%"
+    assert summary["calibrated_threshold"] == "94.0%"
+    assert summary["inconclusive_explanation"] == (
+        "The model detected elevated spoof indicators, but the score did "
+        "not cross the calibrated spoof threshold."
+    )
+    assert "Likely Real / Bonafide" not in summary["prediction"]
     assert "Likely AI-Generated / Spoofed" not in summary["prediction"]
+    # The underlying scientific decision is untouched by presentation logic.
+    assert result.binary_model_decision == "bonafide"
+    assert result.raw_label == "bonafide"
+    assert result.normalized_label == "BONAFIDE"
 
 
-def test_result_summary_no_disagreement_flag_for_high_bonafide_confidence():
+def test_result_summary_falls_back_to_normalized_label_when_no_presentation_state():
+    """Backward compatibility: adapters that never populate
+    presentation_state (e.g. Sara) must keep their existing binary-only
+    display behavior -- no INCONCLUSIVE state is invented for them."""
     from app.formatting import result_summary
     from audio_deepfake_detector.utils.datatypes import PredictionResult
 
     result = PredictionResult(
         raw_label="bonafide",
         normalized_label="BONAFIDE",
+        confidence=0.078,
+        probabilities={"bonafide": 0.078, "spoof": 0.922},
+        model_id="sara_wav2vec2",
+        model_repository="Sara1708/deepfake-audio-wav2vec2",
+        device="cpu",
+        inference_time_ms=140.0,
+        audio_duration_seconds=4.0,
+    )
+    summary = result_summary(result)
+    assert summary["prediction"] == "Likely Real / Bonafide"
+    assert summary["is_inconclusive"] is False
+    assert "inconclusive_explanation" not in summary
+
+
+def test_result_summary_no_inconclusive_state_for_high_bonafide_confidence():
+    from app.formatting import result_summary
+
+    result = _make_spectra_result(
         confidence=0.97,
         probabilities={"bonafide": 0.97, "spoof": 0.03},
-        model_id="spectra_aasist3_onnx_int8",
-        model_repository="Limitless-8/spectra-aasist3-int8-audio-deepfake",
-        device="cpu",
-        inference_time_ms=650.0,
-        audio_duration_seconds=4.04,
+        presentation_state="BONAFIDE",
     )
     summary = result_summary(result)
     assert summary["confidence_label"] == "Bonafide class probability"
-    assert summary["threshold_disagreement"] is False
+    assert summary["is_inconclusive"] is False
+    assert summary["prediction"] == "Likely Real / Bonafide"
 
 
-def test_result_summary_no_disagreement_flag_for_high_spoof_confidence():
+def test_result_summary_no_inconclusive_state_for_high_spoof_confidence():
     from app.formatting import result_summary
-    from audio_deepfake_detector.utils.datatypes import PredictionResult
 
-    result = PredictionResult(
+    result = _make_spectra_result(
         raw_label="spoof",
         normalized_label="SPOOF",
         confidence=0.99,
         probabilities={"bonafide": 0.01, "spoof": 0.99},
-        model_id="spectra_aasist3_onnx_int8",
-        model_repository="Limitless-8/spectra-aasist3-int8-audio-deepfake",
-        device="cpu",
-        inference_time_ms=650.0,
-        audio_duration_seconds=4.04,
+        binary_model_decision="spoof",
+        presentation_state="SPOOF",
     )
     summary = result_summary(result)
     assert summary["confidence_label"] == "Spoof class probability"
-    assert summary["threshold_disagreement"] is False
+    assert summary["is_inconclusive"] is False
     assert summary["prediction"] == "Likely AI-Generated / Spoofed"
+
+
+# ---------------------------------------------------------------------------
+# presentation_state() boundary tests (Step 8/9 of the inconclusive-state phase)
+# ---------------------------------------------------------------------------
+
+
+def test_presentation_state_low_spoof_prob_is_bonafide():
+    assert presentation_state(0.20, INT8_DYNAMIC_CALIBRATED_THRESHOLD) == "BONAFIDE"
+
+
+def test_presentation_state_mid_spoof_prob_is_inconclusive():
+    assert presentation_state(0.70, INT8_DYNAMIC_CALIBRATED_THRESHOLD) == "INCONCLUSIVE"
+
+
+def test_presentation_state_exact_live_bug_number_is_inconclusive():
+    assert presentation_state(0.922, INT8_DYNAMIC_CALIBRATED_THRESHOLD) == "INCONCLUSIVE"
+
+
+def test_presentation_state_just_below_threshold_is_inconclusive():
+    t = INT8_DYNAMIC_CALIBRATED_THRESHOLD
+    assert presentation_state(np.nextafter(t, 0.0), t) == "INCONCLUSIVE"
+
+
+def test_presentation_state_exact_threshold_is_spoof():
+    t = INT8_DYNAMIC_CALIBRATED_THRESHOLD
+    assert presentation_state(t, t) == "SPOOF"
+
+
+def test_presentation_state_above_threshold_is_spoof():
+    t = INT8_DYNAMIC_CALIBRATED_THRESHOLD
+    assert presentation_state(np.nextafter(t, 1.0), t) == "SPOOF"
+    assert presentation_state(0.999, t) == "SPOOF"
+
+
+def test_presentation_state_exact_half_boundary_is_bonafide_not_inconclusive():
+    # The INCONCLUSIVE zone is defined as strictly > 0.5 (exclusive).
+    assert presentation_state(0.5, INT8_DYNAMIC_CALIBRATED_THRESHOLD) == "BONAFIDE"
+
+
+def test_presentation_state_matches_measured_disagreement_examples():
+    # Real spoof_prob values from the measured 12/400 disagreement set
+    # (docs/spectra_prediction_semantics_fix.md) -- all must be INCONCLUSIVE.
+    t = INT8_DYNAMIC_CALIBRATED_THRESHOLD
+    measured_disagreement_examples = [
+        0.6415131688117981,
+        0.8434123396873474,
+        0.8918792605400085,
+        0.9260340332984924,
+        0.9175893068313599,
+    ]
+    for s in measured_disagreement_examples:
+        assert presentation_state(s, t) == "INCONCLUSIVE"
+
+
+def test_binary_model_decision_unaffected_by_presentation_state_in_disagreement_zone():
+    """The exact requirement of Step 2/5: presentation_state introduces a
+    third state, but decide_label() (the binary, evaluation-used decision)
+    must remain exactly two-valued and unchanged for the same inputs."""
+    t = INT8_DYNAMIC_CALIBRATED_THRESHOLD
+    for spoof_prob in (0.6415131688117981, 0.8918792605400085, 0.922):
+        assert decide_label(spoof_prob, t) == "bonafide"
+        assert presentation_state(spoof_prob, t) == "INCONCLUSIVE"
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+def test_load_and_predict_populates_presentation_state_and_binary_decision():
+    detector = create_detector("spectra_aasist3_onnx_int8", device="cpu")
+    try:
+        detector.load(local_onnx_path="models/cache/quantized/spectra-aasist3-int8-dynamic.onnx")
+
+        from pathlib import Path
+
+        from audio_deepfake_detector.preprocessing.audio_loader import load_audio_file
+        from scripts.generate_smoke_audio import generate_all
+
+        files = generate_all(output_dir=Path("data/samples"))
+        multitone = next(f for f in files if "multitone_4s" in f.name)
+        sample = load_audio_file(multitone)
+
+        result = detector.predict(sample)
+        assert result.binary_model_decision in ("bonafide", "spoof")
+        assert result.presentation_state in ("BONAFIDE", "SPOOF", "INCONCLUSIVE")
+        # binary_model_decision must always mirror raw_label exactly.
+        assert result.binary_model_decision == result.raw_label
+    finally:
+        detector.unload()
+
+
+# ---------------------------------------------------------------------------
+# Model-aware technical-details metadata tests (Step 9)
+# ---------------------------------------------------------------------------
+
+
+def test_spectra_model_info_contains_expected_display_fields_and_not_sara_strings():
+    config = load_models_config().get("spectra_aasist3_onnx_int8")
+    detector = CandidateSpectraAasist3OnnxDetector(model_config=config, device="cpu")
+    info = detector.model_info()
+
+    assert "Spectra-AASIST3" in info["display_name"]
+    assert "XLS-R-300M" in info["architecture_short"]
+    assert "ONNX Runtime" in info["runtime"]
+    assert info["sample_rate"] == 16000
+    assert info["preemphasis_coefficient"] == 0.97
+
+    serialized = str(info)
+    assert "Sara1708" not in serialized
+    assert "facebook/wav2vec2-base" not in serialized
+
+
+def test_sara_model_info_contains_display_fields_distinct_from_spectra():
+    from audio_deepfake_detector.models.candidate_b import CandidateBWav2Vec2Detector
+
+    config = load_models_config().get("sara_wav2vec2")
+    detector = CandidateBWav2Vec2Detector(model_config=config, device="cpu")
+    info = detector.model_info()
+
+    assert info["display_name"] == "Sara Wav2Vec2"
+    assert "PyTorch" in info["runtime"]
+    assert "XLS-R-300M" not in info["architecture_short"]
+    assert "Spectra-AASIST3" not in str(info)

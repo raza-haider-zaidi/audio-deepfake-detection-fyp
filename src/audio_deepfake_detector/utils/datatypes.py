@@ -60,6 +60,17 @@ class PredictionResult:
     audio_duration_seconds: float
     windows_analyzed: int = 1
     window_predictions: list[WindowPrediction] = field(default_factory=list)
+    # Optional, adapter-populated: the original binary decision used for
+    # scientific evaluation (frozen, reproducibility-critical -- never
+    # overwritten by presentation logic) and a separate, UI-only
+    # presentation state that MAY introduce a third "INCONCLUSIVE" value
+    # for calibrated-threshold/naive-softmax-split disagreement zones. Both
+    # default to None for adapters that don't populate them (e.g. Sara),
+    # so existing callers are unaffected. See candidate_e.py's
+    # decide_label()/presentation_state() and
+    # docs/spectra_inconclusive_state.md.
+    binary_model_decision: str | None = None
+    presentation_state: str | None = None
 
 
 @dataclass

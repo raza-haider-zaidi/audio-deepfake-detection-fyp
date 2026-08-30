@@ -183,6 +183,36 @@ def decide_label(spoof_prob: float, threshold: float) -> str:
     return "spoof" if spoof_prob >= threshold else "bonafide"
 
 
+def presentation_state(spoof_prob: float, threshold: float) -> str:
+    """UI-only ABSTENTION/presentation state. NOT a new model class, and
+    NEVER used for scientific evaluation (see decide_label(), which remains
+    the sole binary decision used for EER/ROC-AUC/F1/FPR/FNR).
+
+    Returns "SPOOF" if spoof_prob >= threshold, "BONAFIDE" if
+    spoof_prob <= 0.5, else "INCONCLUSIVE" for the narrow zone
+    0.5 < spoof_prob < threshold, where the calibrated (low-bonafide-FPR)
+    decision says bonafide but a naive 50/50 softmax split would say spoof.
+    Verified to match the measured disagreement set exactly (12/400 = 3.0%
+    of the frozen calibration+evaluation clips -- see
+    docs/spectra_prediction_semantics_fix.md and
+    docs/spectra_inconclusive_state.md).
+
+    docstring-verified boundary behavior (also unit-tested):
+      spoof_prob == threshold        -> "SPOOF" (>= is inclusive, matches
+                                         decide_label() and
+                                         evaluation/metrics.py's own
+                                         compute_threshold_metrics)
+      spoof_prob just below threshold -> "INCONCLUSIVE"
+      spoof_prob == 0.5              -> "BONAFIDE" (boundary is exclusive
+                                         on the INCONCLUSIVE side: `> 0.5`)
+    """
+    if spoof_prob >= threshold:
+        return "SPOOF"
+    if spoof_prob > 0.5:
+        return "INCONCLUSIVE"
+    return "BONAFIDE"
+
+
 class CandidateSpectraAasist3OnnxDetector(BaseDeepfakeDetector):
     def __init__(self, model_config: ModelConfig, device: str = "cpu"):
         if device != "cpu":
@@ -329,6 +359,7 @@ class CandidateSpectraAasist3OnnxDetector(BaseDeepfakeDetector):
         # verified identical to the frozen calibration/evaluation rule, see
         # its own docstring and docs/spectra_prediction_semantics_fix.md.
         raw_label = decide_label(spoof_prob, self.threshold)
+        presentation = presentation_state(spoof_prob, self.threshold)
 
         window_predictions = [
             WindowPrediction(
@@ -352,6 +383,12 @@ class CandidateSpectraAasist3OnnxDetector(BaseDeepfakeDetector):
             audio_duration_seconds=audio_sample.duration_seconds,
             windows_analyzed=1,
             window_predictions=window_predictions,
+            # binary_model_decision mirrors raw_label/normalized_label exactly --
+            # it is the SAME frozen decision used for evaluation, preserved
+            # under an explicit name per docs/spectra_inconclusive_state.md
+            # Step 5, never overwritten by presentation_state.
+            binary_model_decision=raw_label,
+            presentation_state=presentation,
         )
 
     def predict_full_clip(self, audio_sample: AudioSample, aggregation: str = "mean") -> dict:
@@ -412,4 +449,21 @@ class CandidateSpectraAasist3OnnxDetector(BaseDeepfakeDetector):
             "expected_sha256": self.model_config.expected_sha256,
             "author_default_threshold_on_bonafide_logit": AUTHOR_DEFAULT_THRESHOLD,
             "unpublished_model": True,
+            # UI-facing display metadata (docs/spectra_inconclusive_state.md
+            # Step 6/7) -- the technical-details panel reads these instead of
+            # hardcoding model-specific strings.
+            "display_name": "Spectra-AASIST3 INT8",
+            "architecture_short": "XLS-R-300M + KAN-enhanced AASIST",
+            "runtime": "ONNX Runtime (CPU)",
+            "native_window_description": f"{self._input_length} samples (~{REQUIRED_SAMPLES / self.sample_rate:.2f}s), deterministic first-window, tile-repeat if shorter",
+            "preemphasis_coefficient": PREEMPHASIS_COEFF,
+            "threshold_description": f"{self.threshold:.6f} (spoof probability, not raw logit)",
+            "aggregation_description": (
+                "Author-compatible single deterministic window (first "
+                f"{REQUIRED_SAMPLES} samples of the clip). Multi-window "
+                "aggregation across a full clip is available as a "
+                "project-level application extension "
+                "(predict_full_clip()) but is NOT author-native behavior "
+                "and is not used by the current production analysis path."
+            ),
         }

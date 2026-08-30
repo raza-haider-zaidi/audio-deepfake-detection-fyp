@@ -177,4 +177,17 @@ class CandidateBWav2Vec2Detector(BaseDeepfakeDetector):
             "label_mapping": self._label_mapping,
             "device": self.device,
             "loaded": self._model is not None,
+            # UI-facing display metadata (docs/spectra_inconclusive_state.md
+            # Step 7) -- generic technical-details rendering reads these
+            # instead of hardcoding model-specific strings per adapter.
+            "display_name": "Sara Wav2Vec2",
+            "architecture_short": "Wav2Vec2 (facebook/wav2vec2-base backbone)",
+            "runtime": "PyTorch (CPU)",
+            "native_window_description": f"{WINDOW_SAMPLES} samples (4.0s), {HOP_SAMPLES}-sample hop (50% overlap sliding window)",
+            "aggregation_description": (
+                "Mean spoof probability across all sliding windows when a "
+                "clip spans more than one 4-second window -- a project-level "
+                "aggregation choice, not scientifically validated by the "
+                "original model authors."
+            ),
         }
