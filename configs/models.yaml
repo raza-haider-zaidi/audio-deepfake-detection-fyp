@@ -260,9 +260,9 @@ models:
 
   spectra_aasist3_onnx_int8:
     id: spectra_aasist3_onnx_int8
-    repository: PENDING_HF_PUBLISH  # placeholder -- see docs/spectra_streamlit_candidate.md Step 4-9; NOT a real, resolvable HF repo yet. Update to <HF_USERNAME>/spectra-aasist3-int8-audio-deepfake once published.
-    revision: PENDING_HF_PUBLISH  # placeholder -- update to the exact HF commit SHA once uploaded
-    enabled: false
+    repository: Limitless-8/spectra-aasist3-int8-audio-deepfake  # published 2026-08-31, public model repo, derived INT8 artifact with attribution to lab260/Spectra-AASIST3
+    revision: b56aed04853cb4e5bf825025c54c93d4bc345c61  # exact HF commit containing the uploaded spectra-aasist3-int8-dynamic.onnx, verified via HfApi.model_info(files_metadata=True)
+    enabled: true
     architecture: "Dynamic INT8 weight-quantized (onnxruntime.quantization.quantize_dynamic, MatMul-only, QInt8, per_channel=False) export of spectra_aasist3_onnx's FP32 ONNX graph. Same wav2vec2 XLS-R-300m + MLP bridge + KAN-AASIST architecture; 351 of 417 MatMul nodes converted to MatMulInteger, 66 MatMul + all 24 Conv nodes remain fp32."
     base_model: facebook/wav2vec2-xls-r-300m
     sample_rate: 16000
@@ -276,9 +276,9 @@ models:
       1: bonafide
     license: Apache-2.0
     training_dataset: "Identical underlying weights to spectra_aasist3_onnx (see that entry) -- quantization is a post-hoc numerical transform of the same trained checkpoint, not a retraining."
-    source_repository: null
-    source_repository_status: "DERIVED ARTIFACT -- this INT8 file was generated locally by this project (scripts/run_spectra_int8_evaluation.py pipeline; quantize_dynamic call) from the verified FP32 checkpoint. It is NOT hosted anywhere on Hugging Face and is NOT committed to this git repository (>300MB, gitignored under models/cache/*). See docs/spectra_production_optimization.md Step 17 for the undecided production-distribution question (download-FP32-then-quantize-at-startup vs. publish-derived-artifact-to-HF vs. keep-FP32-only) -- no option was chosen or executed without explicit user instruction."
-    deployment_role: research_candidate_pending_distribution_decision
+    source_repository: https://huggingface.co/Limitless-8/spectra-aasist3-int8-audio-deepfake
+    source_repository_status: "DERIVED ARTIFACT, PUBLISHED. Generated locally by this project (scripts/run_spectra_int8_evaluation.py pipeline; quantize_dynamic call) from the verified lab260/Spectra-AASIST3 FP32 checkpoint, then published publicly to Limitless-8/spectra-aasist3-int8-audio-deepfake on Hugging Face (commit b56aed04853cb4e5bf825025c54c93d4bc345c61), with a model card crediting the original authors (lab260/Spectra-AASIST3, Apache-2.0) and the upstream facebook/wav2vec2-xls-r-300m backbone. NOT committed to this git repository (>300MB, gitignored under models/cache/*) -- downloaded from the public HF repo at runtime via huggingface_hub, with SHA256 verified before the ONNX session is constructed."
+    deployment_role: cpu_streamlit_candidate_int8
     notes: >
       PRODUCTION OPTIMIZATION sub-phase. SHA256 of the locally-generated
       artifact: 444f832d306a2be4f823119f84e698e8821db6a1aab248593d4b05b7a9a48108.

@@ -6,50 +6,29 @@ currently live Streamlit deployment (still `sara_wav2vec2`) is untouched.
 This branch prepares a **second, temporary** Streamlit app for validation
 only — it does not replace anything live.
 
-## Status: BLOCKED on Hugging Face authentication (manual action required)
+## Status: Hugging Face artifact published; production config pinned
 
-This phase's primary goal — publishing the derived INT8 ONNX artifact to a
-public Hugging Face model repository — **could not be completed**, because
-it requires a Hugging Face account/token this project cannot obtain or
-guess on its own, and the instructions for this phase are explicit: do not
-guess a username, do not ask for a token in chat, and stop for manual
-browser/account action when authentication is required.
+Authenticated as **`Limitless-8`** (`hf auth whoami`, verified — no token
+ever printed or requested in chat). The target repository name was free
+(`HfApi.model_info` returned `RepositoryNotFoundError` before creation).
 
-```
-$ hf auth whoami
-Error: Not logged in
-```
+- **Repository**: [`Limitless-8/spectra-aasist3-int8-audio-deepfake`](https://huggingface.co/Limitless-8/spectra-aasist3-int8-audio-deepfake) — **public** model repository (repo_type=`model`, `private=False`)
+- **Files uploaded**: `README.md` (model card), `quantization_metadata.json`, `reproduce_quantization.py`, `spectra-aasist3-int8-dynamic.onnx`
+- **Uploaded artifact**: 364,036,647 bytes, SHA256
+  `444f832d306a2be4f823119f84e698e8821db6a1aab248593d4b05b7a9a48108`
+- **Resulting HF commit (revision)**: `b56aed04853cb4e5bf825025c54c93d4bc345c61`
+- **Remote/local SHA256 match**: confirmed — `HfApi.model_info(files_metadata=True)`'s
+  `lfs.sha256` for the uploaded file is byte-identical to the locally
+  computed hash before upload.
 
-**What you need to do, exactly:**
-
-1. Open a terminal with this project's `.venv` activated (or run
-   `.venv\Scripts\hf auth login` directly).
-2. Run `hf auth login` (or, in this environment, `.venv\Scripts\hf.exe
-   auth login`).
-3. It will prompt for a Hugging Face access token. Create one, if you
-   don't already have a suitable one, at
-   https://huggingface.co/settings/tokens — a token with **write** access
-   is required to create a repository and upload files. Paste it into the
-   terminal prompt yourself; **do not paste it into this chat.**
-4. Once logged in, tell me to continue, and I will:
-   - confirm your authenticated username (`hf auth whoami`, printing only
-     the username, never the token),
-   - check whether `<your-username>/spectra-aasist3-int8-audio-deepfake`
-     already exists (and stop without overwriting if it contains
-     unrelated work),
-   - create the public model repository,
-   - upload the model card, `quantization_metadata.json`, and the INT8
-     ONNX artifact,
-   - record the resulting commit SHA,
-   - pin that exact repository/revision/SHA256 into `configs/models.yaml`
-     for `spectra_aasist3_onnx_int8` (replacing the current
-     `PENDING_HF_PUBLISH` placeholders),
-   - re-run the resource benchmark against the real hosted artifact
-     (Step 19), and
-   - finish Steps 21–22 (commit, push, second-deployment coordinates).
-
-Everything in this document that does **not** depend on the actual upload
-has already been completed and is described below.
+`configs/models.yaml`'s `spectra_aasist3_onnx_int8` entry now has
+`repository`/`revision` pinned to the values above (replacing the earlier
+`PENDING_HF_PUBLISH` placeholders), `expected_sha256` unchanged, and
+`enabled: true`. An end-to-end real test — fresh download via
+`create_detector("spectra_aasist3_onnx_int8").load()`, no `local_onnx_path`
+override — succeeded: the SHA256 check passed silently (no
+`RuntimeError`), and `detector.threshold` resolved to the INT8-calibrated
+value automatically.
 
 ## 1. INT8 artifact re-verification (Step 2)
 
@@ -257,18 +236,26 @@ All of the above run in the **default** suite (no network, no large
 download). The existing `test_candidate_e.py` integration tests
 (model download + real inference) are unaffected and still pass.
 
-## 13. Resource revalidation against the hosted artifact (Step 19) — PENDING
+## 13. Resource revalidation against the hosted artifact (Step 19) — DONE
 
-Cannot be performed meaningfully until Section 4 (HF publish) is done —
-there is no real hosted artifact to download and benchmark yet. The prior
-phase's local-artifact benchmark
-(`docs/spectra_production_optimization.md`, Sections 8–10) remains the
-best available reference: ~770MB RSS after load, ~821MB complete-app peak
-RSS, ~6.5s cold load, ~639ms per-window, ~5.27s for a real 30-second clip.
-This section will be updated with the post-publish, hosted-artifact
-numbers once Section 4 is complete.
+Full detail: `results/metrics/spectra_int8_hosted_artifact_revalidation.json`.
+Benchmarked using the **actual** `Limitless-8/spectra-aasist3-int8-audio-deepfake`
+artifact, freshly downloaded via `hf_hub_download` (one-time
+download+SHA256-verify: 108.4s for 364MB) and then benchmarked from the
+local HF cache:
 
-## 14. Architecture (target, once published)
+| Metric | Prior local-artifact benchmark | Hosted-artifact revalidation | Regression? |
+|---|---|---|---|
+| Cold load (from cache) | 6.49s | 5.98s | No |
+| RSS after inference | ~770MB | 759.2MB | No |
+| Native 4.04s-window latency | 639.2ms | 645.7ms | No |
+| Real 30s application analysis | 5.27s | 5.19s | No |
+
+All figures are within normal run-to-run variance — **no material
+regression** from downloading and running the actual publicly-hosted
+artifact instead of the local-only one from the prior phase.
+
+## 14. Architecture (published)
 
 ```
 Browser
@@ -283,8 +270,8 @@ streamlit_app.py + app/  (presentation layer, unchanged from main except DEPLOYM
 audio_deepfake_detector.models.registry -> candidate_e.py (spectra_aasist3_onnx_int8)
    |
    v
-huggingface_hub.hf_hub_download(<HF_USERNAME>/spectra-aasist3-int8-audio-deepfake, revision=<pinned SHA>)
-   -> SHA256 verified against expected_sha256 before the ONNX session is ever constructed
+huggingface_hub.hf_hub_download(Limitless-8/spectra-aasist3-int8-audio-deepfake, revision=b56aed04853cb4e5bf825025c54c93d4bc345c61)
+   -> SHA256 verified against expected_sha256 (444f832d...) before the ONNX session is ever constructed
    |
    v
 onnxruntime.InferenceSession, CPUExecutionProvider only, intra_op_num_threads=2
