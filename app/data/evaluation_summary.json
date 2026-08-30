@@ -1,0 +1,132 @@
+{
+  "_provenance": {
+    "purpose": "A small, COMMITTED, curated summary of project-measured results for the deployed app's Evaluation/Model-Development pages. This is intentionally separate from results/metrics/* (gitignored, large experimental outputs) so the deployed app has something authoritative to read without shipping large research artifacts. Every value below was copied verbatim from the source file named next to it; nothing here was retyped from memory or estimated.",
+    "generated": "2026-08-31",
+    "sources": [
+      "results/metrics/spectra_fp32_baseline.json",
+      "results/metrics/spectra_int8_evaluation.json",
+      "results/metrics/spectra_int8_acceptance_criteria.json",
+      "results/metrics/spectra_resource_fp32_vs_int8.json",
+      "results/metrics/spectra_streamlit_process_simulation_fp32.json",
+      "results/metrics/spectra_streamlit_process_simulation_int8.json",
+      "results/metrics/spectra_aasist3_sara_comparison.json",
+      "results/metrics/spectra_aasist3_robustness.json",
+      "results/metrics/spectra_onnx_graph_analysis.json"
+    ],
+    "dataset_methodology": "200-clip balanced evaluation subset of SpeechAntiSpoofingBenchmarks/InTheWild (100 bonafide + 100 spoof), deterministically sampled and split from calibration (seed=2024), disjoint from a separate 200-clip calibration subset used only for threshold selection. See docs/spectra_aasist3_evaluation.md and docs/spectra_production_optimization.md for full methodology."
+  },
+  "int8_evaluation": {
+    "source": "results/metrics/spectra_int8_evaluation.json",
+    "n_samples": 200,
+    "threshold_used": 0.939693808555603,
+    "accuracy": 0.94,
+    "balanced_accuracy": 0.94,
+    "precision": 0.9782608695652174,
+    "recall": 0.9,
+    "f1": 0.9375,
+    "roc_auc": 0.9819,
+    "eer": 0.030000000000000013,
+    "bonafide_fpr": 0.02,
+    "spoof_fnr": 0.09999999999999998,
+    "confusion_matrix": {
+      "tp_spoof_correct": 90,
+      "tn_bonafide_correct": 98,
+      "fp_bonafide_as_spoof": 2,
+      "fn_spoof_as_bonafide": 10
+    }
+  },
+  "fp32_evaluation": {
+    "source": "results/metrics/spectra_fp32_baseline.json (frozen_evaluation_at_eer_threshold)",
+    "n_samples": 200,
+    "threshold_used": 0.9299831390380859,
+    "accuracy": 0.935,
+    "balanced_accuracy": 0.935,
+    "precision": 0.967741935483871,
+    "recall": 0.9,
+    "f1": 0.9326424870466321,
+    "roc_auc": 0.9766,
+    "eer": 0.020000000000000004,
+    "bonafide_fpr": 0.03,
+    "spoof_fnr": 0.09999999999999998,
+    "confusion_matrix": {
+      "tp_spoof_correct": 90,
+      "tn_bonafide_correct": 97,
+      "fp_bonafide_as_spoof": 3,
+      "fn_spoof_as_bonafide": 10
+    }
+  },
+  "fp32_vs_int8_acceptance": {
+    "source": "results/metrics/spectra_int8_acceptance_criteria.json",
+    "deltas": {
+      "eer_increase_pp": 1.0,
+      "bonafide_fpr_change_pp": -1.0,
+      "f1_change": 0.0048575129533678,
+      "roc_auc_change": 0.0053
+    },
+    "all_criteria_pass": true,
+    "interpretation": "On this 200-clip evaluation set, INT8 dynamic quantization causes no measurable detection degradation relative to FP32 -- it is statistically indistinguishable from FP32 within small-sample noise, nominally better on 3 of 4 tracked metrics (bonafide FPR, F1, ROC-AUC), with EER nominally higher by exactly 1.0 percentage point. This is NOT evidence that quantization improves detection (n=200 is too small to support that causal claim)."
+  },
+  "sara_same_clip_comparison": {
+    "source": "results/metrics/spectra_aasist3_sara_comparison.json",
+    "same_evaluation_set": true,
+    "n_shared_evaluation_clips": 200,
+    "spectra": {
+      "threshold_used": 0.9299831390380859,
+      "accuracy": 0.935,
+      "f1": 0.9326424870466321,
+      "roc_auc": 0.9766,
+      "eer": 0.020000000000000004,
+      "bonafide_fpr": 0.03,
+      "spoof_fnr": 0.09999999999999998
+    },
+    "sara": {
+      "threshold_used": 0.5,
+      "accuracy": 0.63,
+      "f1": 0.717557251908397,
+      "roc_auc": 0.7869,
+      "eer": 0.25,
+      "bonafide_fpr": 0.68,
+      "spoof_fnr": 0.06000000000000005
+    },
+    "note": "Both rows use the exact same 200 evaluation clips and the same underlying candidate this section calls 'Spectra' is the FP32 spectra_aasist3_onnx model, not the INT8 variant -- included because it is the only same-set comparison against Sara that exists in this project's artifacts. There is no same-set Sara-vs-INT8 comparison in the project's results; do not imply one."
+  },
+  "resource_comparison": {
+    "source": "results/metrics/spectra_resource_fp32_vs_int8.json, spectra_fp32_baseline.json, spectra_streamlit_process_simulation_{fp32,int8}.json",
+    "model_size_bytes": {"fp32": 1279022864, "int8": 364036647},
+    "size_reduction_percent": 71.53,
+    "cold_load_time_s_threads_2": {"fp32": 12.27, "int8": 6.49},
+    "rss_after_inference_mb_threads_2": {"fp32": 1527.8, "int8": 634.5},
+    "native_4_04s_window_latency_ms_threads_2": {"fp32": 1052.4, "int8": 639.2},
+    "complete_app_peak_rss_mb_after_30s_analysis": {"fp32": 1721.6, "int8": 821.4},
+    "real_30s_application_analysis_time_s": {"fp32": 8.13, "int8": 5.06}
+  },
+  "robustness_fp32_reference": {
+    "source": "results/metrics/spectra_aasist3_robustness.json",
+    "note": "Measured on the FP32 model on a fixed 40-clip subset (20 bonafide + 20 spoof) of the evaluation set, prior to INT8 quantization. Not re-measured on INT8 in the project's committed artifacts -- shown as the FP32 reference point only.",
+    "conditions": {
+      "original": {"eer": 0.0, "roc_auc": 1.0, "f1_at_calibration_threshold": 1.0, "bonafide_fpr_at_calibration_threshold": 0.0},
+      "mp3_128k": {"eer": 0.0, "roc_auc": 1.0, "f1_at_calibration_threshold": 0.9473684210526316, "bonafide_fpr_at_calibration_threshold": 0.0},
+      "mp3_64k": {"eer": 0.0, "roc_auc": 1.0, "f1_at_calibration_threshold": 0.9473684210526316, "bonafide_fpr_at_calibration_threshold": 0.0},
+      "telephone_300_3400hz": {"eer": 0.0, "roc_auc": 1.0, "f1_at_calibration_threshold": 1.0, "bonafide_fpr_at_calibration_threshold": 0.0},
+      "noise_20db": {"eer": 0.0, "roc_auc": 1.0, "f1_at_calibration_threshold": 1.0, "bonafide_fpr_at_calibration_threshold": 0.0},
+      "noise_10db": {"eer": 0.07500000000000002, "roc_auc": 0.995, "f1_at_calibration_threshold": 0.9500000000000001, "bonafide_fpr_at_calibration_threshold": 0.05}
+    }
+  },
+  "onnx_graph": {
+    "source": "results/metrics/spectra_onnx_graph_analysis.json",
+    "quantized_matmul_of_total": "351 of 417 MatMul nodes converted to MatMulInteger; 66 MatMul + all 24 Conv nodes remain FP32",
+    "matmul_weight_share_percent": 95.4
+  },
+  "model_development_timeline": {
+    "note": "Chronological summary of this project's own research phases, as documented in docs/. Presented as engineering iteration, not failure.",
+    "steps": [
+      {"step": "Initial detector", "detail": "sara_wav2vec2 deployed as the initial production candidate.", "source": "docs/inference_calibration.md"},
+      {"step": "Out-of-domain evaluation", "detail": "Sara showed a 20% out-of-domain bonafide false-positive rate on a real-world calibration set (vs 0% in-domain).", "source": "docs/inference_calibration.md"},
+      {"step": "Generalization limitation identified", "detail": "Decision gate Outcome C: Sara alone judged not sufficiently reliable for real-world deployment.", "source": "docs/inference_calibration.md"},
+      {"step": "Alternative model evaluation", "detail": "lab260/Spectra-AASIST3 evaluated on the same-set In-the-Wild clips; bonafide FPR fell from 68% (Sara) to 3% (Spectra FP32).", "source": "docs/spectra_aasist3_evaluation.md"},
+      {"step": "Spectra-AASIST3 selected", "detail": "Decision gate Outcome A (with academic + resource caveats): adopted as primary detection logic.", "source": "docs/spectra_aasist3_evaluation.md"},
+      {"step": "INT8 ONNX optimization", "detail": "Dynamic INT8 quantization: 71.5% smaller, ~2x faster load, no measurable detection degradation.", "source": "docs/spectra_production_optimization.md"},
+      {"step": "CPU deployment", "detail": "Published to a public Hugging Face model repository; deployed via ONNX Runtime CPU with SHA256-verified download.", "source": "docs/spectra_streamlit_candidate.md"}
+    ]
+  }
+}

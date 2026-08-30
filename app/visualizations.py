@@ -61,6 +61,32 @@ def plot_waveform(waveform: np.ndarray, sample_rate: int) -> matplotlib.figure.F
     return fig
 
 
+def plot_segment_timeline(segment_spoof_probs: list[float], segment_duration_seconds: float, threshold: float) -> matplotlib.figure.Figure:
+    """Segment-evidence timeline: spoof probability per non-overlapping
+    segment, with the calibrated spoof threshold drawn as a reference
+    line. Purely descriptive -- see app/analysis/evidence.py."""
+    n = len(segment_spoof_probs)
+    x = [(i + 0.5) * segment_duration_seconds for i in range(n)]
+
+    fig = matplotlib.figure.Figure(figsize=(9.5, 2.6), facecolor=PLOT_BG)
+    ax = fig.add_subplot(111)
+    ax.set_facecolor(PLOT_BG)
+    ax.plot(x, segment_spoof_probs, marker="o", markersize=4, linewidth=1.2, color=PLOT_LINE)
+    ax.axhline(threshold, color="#e0ad4f", linewidth=1.0, linestyle="--", label="Calibrated spoof threshold")
+    ax.set_ylim(-0.05, 1.05)
+    ax.set_xlabel("Time (s)", color=PLOT_TEXT, fontsize=9)
+    ax.set_ylabel("Spoof probability", color=PLOT_TEXT, fontsize=9)
+    ax.tick_params(colors=PLOT_TEXT, labelsize=8)
+    ax.grid(True, color=PLOT_GRID, linewidth=0.6, alpha=0.6)
+    legend = ax.legend(loc="upper right", fontsize=7, facecolor=PLOT_BG, edgecolor=PLOT_GRID)
+    for text in legend.get_texts():
+        text.set_color(PLOT_TEXT)
+    for spine in ax.spines.values():
+        spine.set_color(PLOT_GRID)
+    fig.tight_layout()
+    return fig
+
+
 def plot_mel_spectrogram(waveform: np.ndarray, sample_rate: int) -> matplotlib.figure.Figure:
     import librosa
     import librosa.display
