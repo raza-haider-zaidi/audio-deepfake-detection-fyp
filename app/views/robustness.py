@@ -11,7 +11,7 @@ from __future__ import annotations
 import streamlit as st
 
 from app.analysis.robustness import ffmpeg_available, run_robustness_analysis, stability_summary
-from app.components import render_empty_state, render_section_title
+from app.components import render_empty_state, render_professional_table, render_section_title
 from app.errors import UserFacingError
 from app.model_loader import DEPLOYMENT_MODEL_ID, get_detector
 from app.validation import validate_and_load_upload
@@ -80,7 +80,12 @@ def render() -> None:
                     "Processing time": f"{r.processing_time_ms:.0f} ms",
                 }
             )
-        st.dataframe(rows, width="stretch", hide_index=True)
+        render_professional_table(
+            ["Condition", "Result", "Spoof probability", "Difference from original", "Processing time"],
+            rows,
+            numeric_columns={"Spoof probability", "Difference from original", "Processing time"},
+            status_columns={"Result"},
+        )
         st.caption(f"Result stability: {stability_summary(results)}")
 
         threshold = get_detector(DEPLOYMENT_MODEL_ID).model_info().get("calibrated_threshold_spoof_probability")

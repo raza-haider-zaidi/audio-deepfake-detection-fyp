@@ -1,6 +1,16 @@
 # Professional Analysis Platform Expansion
 
 Branch: `feat/spectra-streamlit-candidate`. `main` is unmodified.
+
+> **Later phases:** the visual direction and page-routing approach
+> described below were superseded by `docs/analysis_platform_v2.md`
+> (light theme, native top navigation). Multimodal input support (audio
+> file / microphone / voice note / video audio), the professional table
+> redesign, and the premium PDF report are documented in
+> `docs/input_sources.md` and `docs/reporting.md`. None of these later
+> phases changed anything described in this document's scientific-freeze
+> section below.
+
 **The detector is frozen** — no change to the Spectra-AASIST3 model,
 INT8 artifact, Hugging Face revision, SHA256, ONNX Runtime inference,
 preprocessing, pre-emphasis, sample rate, model input length, calibrated

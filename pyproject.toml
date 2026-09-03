@@ -35,6 +35,10 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+    # Test-only: extracts text from generated PDF reports to assert on
+    # their content (app/reporting/pdf_report.py). NOT part of
+    # requirements.txt / the Streamlit Community Cloud deployment.
+    "pypdf>=5.0",
 ]
 # Dev/research-only dependencies for Phase 4 calibration experiments
 # (docs/inference_calibration.md). NOT part of requirements.txt / the

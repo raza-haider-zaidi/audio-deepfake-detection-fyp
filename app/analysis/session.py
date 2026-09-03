@@ -52,6 +52,7 @@ def build_session_entry(
     model_revision: str,
     n_segments: int,
     segment_agreement_level: str | None,
+    source_type: str = "audio_file",
 ) -> dict[str, Any]:
     return {
         "timestamp": datetime.now().isoformat(timespec="seconds"),
@@ -67,6 +68,7 @@ def build_session_entry(
         "model_revision": model_revision,
         "n_segments": n_segments,
         "segment_agreement_level": segment_agreement_level,
+        "source_type": source_type,
     }
 
 

@@ -56,16 +56,27 @@ def render() -> None:
     st.markdown(
         """
 - No account or sign-in is required to use this application.
-- Uploaded audio is processed in memory to produce the current analysis; it is not
-  intentionally written to persistent storage by this application.
+- This applies to every supported input mode — an uploaded audio file, a microphone
+  recording, a voice note, or a video's audio track: the file or recording you select
+  is processed by this hosted application's server-side process to produce the current
+  analysis.
+- Inference is performed by this hosted application's own server-side process — media
+  **does** leave your device to reach that process. This is not a fully client-side/offline
+  tool, and no processing described here happens only on your device.
+- Media is processed in memory to produce the current analysis; it is not intentionally
+  retained after analysis by this application.
+- Voice notes and video uploads that require decoding/transcoding (via ffmpeg) use
+  short-lived temporary files for the duration of that single request only, deleted
+  immediately afterward — never written under the application's own project directory.
 - If you run the optional Robustness Analysis, temporary degraded audio copies exist only
   in memory or in a short-lived temporary directory for the duration of that analysis, and
   are deleted immediately afterward.
-- Inference is performed by this hosted application's own server-side process — audio
-  **does** leave your device to reach that process (this is not a fully client-side/offline
-  tool).
+- Downloadable reports (PDF/HTML/JSON) are generated on demand, in memory, for the current
+  analysis only — they are not stored by this application after being sent to your browser,
+  and the original audio is never embedded inside a generated PDF report.
 - No third-party generative-AI API receives your audio; inference uses a locally-loaded
-  ONNX model.
+  ONNX model. No visual/video-frame analysis is ever performed — video support extracts
+  and analyzes only the audio track.
 """
     )
 

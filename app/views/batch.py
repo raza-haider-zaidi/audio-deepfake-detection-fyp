@@ -15,7 +15,7 @@ from pathlib import Path
 import streamlit as st
 
 from app.analysis.audio_quality import assess_analysis_suitability, compute_audio_quality
-from app.components import render_empty_state, render_section_title
+from app.components import render_empty_state, render_professional_table, render_section_title
 from app.errors import UserFacingError
 from app.formatting import result_summary
 from app.model_loader import DEPLOYMENT_MODEL_ID, get_detector
@@ -52,9 +52,19 @@ def render() -> None:
         st.warning(f"Only the first {MAX_BATCH_FILES} files will be analyzed in this batch.")
         uploaded_files = uploaded_files[:MAX_BATCH_FILES]
 
+    from app.components import professional_table_html
+
+    def _render_queue(placeholder, rows: list[dict]) -> None:
+        placeholder.markdown(
+            professional_table_html(
+                ["Filename", "Size (KB)", "Status"], rows, numeric_columns={"Size (KB)"}, status_columns={"Status"}
+            ),
+            unsafe_allow_html=True,
+        )
+
     queue_rows = [{"Filename": f.name, "Size (KB)": f"{len(f.getvalue()) / 1024:.0f}", "Status": "Queued"} for f in uploaded_files]
     queue_placeholder = st.empty()
-    queue_placeholder.dataframe(queue_rows, width="stretch", hide_index=True)
+    _render_queue(queue_placeholder, queue_rows)
 
     if not st.button("Run batch analysis", type="primary"):
         return
@@ -75,7 +85,7 @@ def render() -> None:
 
     for i, uploaded_file in enumerate(uploaded_files):
         queue_rows[i]["Status"] = "Processing"
-        queue_placeholder.dataframe(queue_rows, width="stretch", hide_index=True)
+        _render_queue(queue_placeholder, queue_rows)
         progress.progress(i / len(uploaded_files), text=f"Analyzing {i + 1} of {len(uploaded_files)}: {uploaded_file.name}")
 
         file_bytes = uploaded_file.getvalue()
@@ -127,13 +137,19 @@ def render() -> None:
                 }
             )
             queue_rows[i]["Status"] = "Failed"
-        queue_placeholder.dataframe(queue_rows, width="stretch", hide_index=True)
+        _render_queue(queue_placeholder, queue_rows)
 
     progress.progress(1.0, text="Batch analysis complete.")
     st.session_state["last_batch_results"] = results
 
     render_section_title("Batch results")
-    st.dataframe(results, width="stretch", hide_index=True)
+    render_professional_table(
+        ["File", "Duration (s)", "Presentation result", "Bonafide probability", "Spoof probability", "Analysis conditions", "Inference time (ms)", "SHA-256"],
+        results,
+        numeric_columns={"Duration (s)", "Bonafide probability", "Spoof probability", "Inference time (ms)"},
+        status_columns={"Presentation result", "Analysis conditions"},
+        stack_on_mobile=True,
+    )
 
     csv_buffer = io.StringIO()
     if results:

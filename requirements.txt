@@ -26,3 +26,8 @@ PyYAML==6.0.3
 psutil==7.2.2
 streamlit==1.62.0
 matplotlib==3.11.1
+# Pure-Python (no system libraries, no LibreOffice/Chrome dependency) PDF
+# generation for the premium downloadable analysis report -- see
+# app/reporting/pdf_report.py and docs/reporting.md. Small footprint,
+# generates bytes in memory, confirmed Streamlit Community Cloud compatible.
+reportlab==4.2.5

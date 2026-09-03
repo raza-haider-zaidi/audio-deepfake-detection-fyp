@@ -27,6 +27,13 @@ DISCLAIMER_TEXT = (
 
 FORBIDDEN_PHRASES = ("verified authentic", "confirmed deepfake", "forensically validated")
 
+SOURCE_DISPLAY_LABELS = {
+    "audio_file": "Audio File",
+    "microphone": "Microphone Capture",
+    "voice_note": "Voice Note",
+    "video_audio": "Video Audio Track",
+}
+
 
 def compute_file_sha256(file_bytes: bytes) -> str:
     return hashlib.sha256(file_bytes).hexdigest()
@@ -73,6 +80,8 @@ def build_report_data(
     suitability_level: str | None,
     model_info: dict,
     inference_time_ms: float,
+    source_type: str = "audio_file",
+    source_metadata: dict | None = None,
 ) -> dict[str, Any]:
     """Assembles every reportable field into a plain, JSON-serializable
     dict. No field here is computed independently of the values already
@@ -88,6 +97,8 @@ def build_report_data(
             "sample_rate_hz": sample_rate,
             "format": audio_format,
             "channels": channels,
+            "source_type": source_type,
+            "source_metadata": source_metadata or {},
         },
         "result": {
             "presentation_result": prediction_label,
@@ -185,12 +196,14 @@ def render_html_report(report_data: dict) -> str:
 
   <h2>Analysis Information</h2>
   <table>
+    {_row("Input source", SOURCE_DISPLAY_LABELS.get(ai.get("source_type"), ai.get("source_type", "Audio File")))}
     {_row("Filename", ai["filename"])}
     {_row("SHA-256", ai["sha256"])}
     {_row("Duration", f"{ai['duration_seconds']:.2f} s")}
     {_row("Sample rate", f"{ai['sample_rate_hz']} Hz")}
     {_row("Format", ai["format"])}
     {_row("Channels", ai["channels"])}
+    {"".join(_row(k.replace('_', ' ').title(), v) for k, v in (ai.get("source_metadata") or {}).items())}
   </table>
 
   <h2>Result</h2>
