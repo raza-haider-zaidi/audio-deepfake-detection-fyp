@@ -63,6 +63,23 @@ STATE_TOKENS = {
     "INCONCLUSIVE": {"fg": COLORS["warning"], "bg": COLORS["warning_bg"], "border": COLORS["warning_border"]},
 }
 
+# Chip tokens for tabular status cells -- superset of STATE_TOKENS covering
+# the "Good/Limited/Poor" analysis-condition vocabulary and generic
+# queue/batch status words used across tables.
+STATUS_CHIP_TOKENS = {
+    **STATE_TOKENS,
+    "GOOD": STATE_TOKENS["BONAFIDE"],
+    "LIMITED": STATE_TOKENS["INCONCLUSIVE"],
+    "POOR": STATE_TOKENS["SPOOF"],
+    "COMPLETE": STATE_TOKENS["BONAFIDE"],
+    "QUEUED": {"fg": COLORS["text_muted"], "bg": COLORS["surface_alt"], "border": COLORS["border_strong"]},
+    "PROCESSING": {"fg": COLORS["accent_strong"], "bg": COLORS["info_bg"], "border": COLORS["info_border"]},
+    "FAILED": STATE_TOKENS["SPOOF"],
+    "HIGH": STATE_TOKENS["BONAFIDE"],
+    "MODERATE": STATE_TOKENS["INCONCLUSIVE"],
+    "MIXED": STATE_TOKENS["SPOOF"],
+}
+
 
 def inject_global_styles() -> str:
     c = COLORS
@@ -220,6 +237,45 @@ div[data-testid="stTopNav"], [data-testid="stAppViewBlockContainer"] > div:first
 .adf-step-tag--presentation {{ background: {c['warning_bg']}; color: {c['warning']}; }}
 
 /* ==========================================================================
+   9b. Professional data tables (replaces default st.dataframe look).
+   ========================================================================== */
+.adf-table-wrap {{
+    border: 1px solid {c['border']}; border-radius: {RADIUS['md']}; overflow-x: auto;
+    background: {c['surface']}; box-shadow: {SHADOW['card']};
+}}
+table.adf-table {{ width: 100%; border-collapse: collapse; font-size: 0.85rem; min-width: 420px; }}
+table.adf-table thead th {{
+    position: sticky; top: 0; background: {c['surface_alt']}; color: {c['text']}; font-weight: 650;
+    text-align: left; padding: 0.6rem 0.85rem; border-bottom: 1px solid {c['border']}; white-space: nowrap;
+}}
+table.adf-table tbody td {{
+    padding: 0.55rem 0.85rem; border-bottom: 1px solid {c['border']}; color: {c['text']};
+    vertical-align: middle;
+}}
+table.adf-table tbody tr:last-child td {{ border-bottom: none; }}
+table.adf-table tbody tr {{ transition: background-color {TRANSITION}; }}
+table.adf-table tbody tr:hover {{ background-color: {c['accent_soft_bg']}; }}
+table.adf-table td.adf-td-num, table.adf-table th.adf-th-num {{ text-align: right; font-family: {MONO_STACK}; font-variant-numeric: tabular-nums; }}
+table.adf-table td.adf-td-label {{ text-align: left; }}
+.adf-chip {{
+    display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.72rem; font-weight: 700;
+    padding: 0.18rem 0.55rem; border-radius: 999px; border: 1px solid var(--adf-chip-border);
+    background: var(--adf-chip-bg); color: var(--adf-chip-fg); white-space: nowrap;
+}}
+.adf-kv-card {{
+    display: none; background: {c['surface']}; border: 1px solid {c['border']}; border-radius: {RADIUS['md']};
+    padding: {SPACING['sm']} {SPACING['md']}; margin-bottom: {SPACING['xs']};
+}}
+.adf-kv-card .adf-kv-row {{ display: flex; justify-content: space-between; gap: {SPACING['sm']}; padding: 0.25rem 0; border-bottom: 1px dashed {c['border']}; font-size: 0.85rem; }}
+.adf-kv-card .adf-kv-row:last-child {{ border-bottom: none; }}
+.adf-kv-card .adf-kv-key {{ color: {c['text_muted']}; font-weight: 600; }}
+.adf-kv-card .adf-kv-val {{ color: {c['text']}; text-align: right; font-family: {MONO_STACK}; }}
+@media (max-width: 480px) {{
+    table.adf-table.adf-table--stack-on-mobile {{ display: none; }}
+    .adf-kv-card {{ display: block; }}
+}}
+
+/* ==========================================================================
    10. Status badges / info callouts / empty states.
    ========================================================================== */
 .adf-status-badge {{
@@ -287,7 +343,7 @@ div[data-testid="stTopNav"], [data-testid="stAppViewBlockContainer"] > div:first
 @media (prefers-reduced-motion: reduce) {{
     .adf-result {{ animation: none; }}
     .stButton > button, .adf-prob-fill, .adf-card--interactive, .adf-feature-card,
-    [data-testid="stFileUploaderDropzone"], [data-testid="stExpander"] {{ transition: none !important; }}
+    [data-testid="stFileUploaderDropzone"], [data-testid="stExpander"], table.adf-table tbody tr {{ transition: none !important; }}
     .adf-card--interactive:hover, .adf-feature-card:hover, .stButton > button:hover {{ transform: none !important; }}
 }}
 

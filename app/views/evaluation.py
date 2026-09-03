@@ -11,7 +11,7 @@ from __future__ import annotations
 import streamlit as st
 
 from app.analysis.threshold_explorer import load_int8_evaluation_scores, sweep_thresholds
-from app.components import render_metric_cards, render_section_title
+from app.components import render_metric_cards, render_professional_table, render_section_title
 from app.evaluation_loader import get_section, load_evaluation_summary
 from app.visualizations import plot_threshold_curve
 
@@ -80,24 +80,15 @@ def render() -> None:
     acceptance = get_section(summary, "fp32_vs_int8_acceptance")
     if fp32_eval and int8_eval:
         render_section_title("Deployment optimization — FP32 vs INT8 detection performance")
-        st.markdown(
-            """
-| Metric | FP32 | INT8 |
-|---|---|---|
-| EER | {fp32_eer:.1f}% | {int8_eer:.1f}% |
-| ROC-AUC | {fp32_auc:.4f} | {int8_auc:.4f} |
-| F1 | {fp32_f1:.4f} | {int8_f1:.4f} |
-| Bonafide FPR | {fp32_fpr:.1f}% | {int8_fpr:.1f}% |
-            """.format(
-                fp32_eer=fp32_eval["eer"] * 100,
-                int8_eer=int8_eval["eer"] * 100,
-                fp32_auc=fp32_eval["roc_auc"],
-                int8_auc=int8_eval["roc_auc"],
-                fp32_f1=fp32_eval["f1"],
-                int8_f1=int8_eval["f1"],
-                fp32_fpr=fp32_eval["bonafide_fpr"] * 100,
-                int8_fpr=int8_eval["bonafide_fpr"] * 100,
-            )
+        render_professional_table(
+            ["Metric", "FP32", "INT8"],
+            [
+                {"Metric": "EER", "FP32": f"{fp32_eval['eer'] * 100:.1f}%", "INT8": f"{int8_eval['eer'] * 100:.1f}%"},
+                {"Metric": "ROC-AUC", "FP32": f"{fp32_eval['roc_auc']:.4f}", "INT8": f"{int8_eval['roc_auc']:.4f}"},
+                {"Metric": "F1", "FP32": f"{fp32_eval['f1']:.4f}", "INT8": f"{int8_eval['f1']:.4f}"},
+                {"Metric": "Bonafide FPR", "FP32": f"{fp32_eval['bonafide_fpr'] * 100:.1f}%", "INT8": f"{int8_eval['bonafide_fpr'] * 100:.1f}%"},
+            ],
+            numeric_columns={"FP32", "INT8"},
         )
         if acceptance:
             st.caption(acceptance.get("interpretation", ""))
@@ -109,15 +100,15 @@ def render() -> None:
         load_time = resource["cold_load_time_s_threads_2"]
         rss = resource["complete_app_peak_rss_mb_after_30s_analysis"]
         latency = resource["real_30s_application_analysis_time_s"]
-        st.markdown(
-            f"""
-| | FP32 | INT8 |
-|---|---|---|
-| Model size | {size['fp32'] / 1e9:.2f} GB | {size['int8'] / 1e6:.0f} MB |
-| Cold load time | {load_time['fp32']:.1f} s | {load_time['int8']:.1f} s |
-| Complete-app peak RSS (30s analysis) | {rss['fp32'] / 1000:.2f} GB | {rss['int8']:.0f} MB |
-| Real 30-second analysis time | {latency['fp32']:.1f} s | {latency['int8']:.1f} s |
-            """
+        render_professional_table(
+            ["Metric", "FP32", "INT8"],
+            [
+                {"Metric": "Model size", "FP32": f"{size['fp32'] / 1e9:.2f} GB", "INT8": f"{size['int8'] / 1e6:.0f} MB"},
+                {"Metric": "Cold load time", "FP32": f"{load_time['fp32']:.1f} s", "INT8": f"{load_time['int8']:.1f} s"},
+                {"Metric": "Complete-app peak RSS (30s analysis)", "FP32": f"{rss['fp32'] / 1000:.2f} GB", "INT8": f"{rss['int8']:.0f} MB"},
+                {"Metric": "Real 30-second analysis time", "FP32": f"{latency['fp32']:.1f} s", "INT8": f"{latency['int8']:.1f} s"},
+            ],
+            numeric_columns={"FP32", "INT8"},
         )
         st.caption(
             f"Size reduction: {resource['size_reduction_percent']:.1f}%. Dynamic INT8 quantization "
@@ -139,14 +130,14 @@ def render() -> None:
                     if sara.get("same_evaluation_set")
                     else "These are separate experiments, not a same-set comparison."
                 )
-                st.markdown(
-                    f"""
-| Metric | Sara (deployed baseline) | Spectra (FP32) |
-|---|---|---|
-| Accuracy | {sara['sara']['accuracy'] * 100:.1f}% | {sara['spectra']['accuracy'] * 100:.1f}% |
-| Bonafide FPR | {sara['sara']['bonafide_fpr'] * 100:.1f}% | {sara['spectra']['bonafide_fpr'] * 100:.1f}% |
-| EER | {sara['sara']['eer'] * 100:.1f}% | {sara['spectra']['eer'] * 100:.1f}% |
-                    """
+                render_professional_table(
+                    ["Metric", "Sara (deployed baseline)", "Spectra (FP32)"],
+                    [
+                        {"Metric": "Accuracy", "Sara (deployed baseline)": f"{sara['sara']['accuracy'] * 100:.1f}%", "Spectra (FP32)": f"{sara['spectra']['accuracy'] * 100:.1f}%"},
+                        {"Metric": "Bonafide FPR", "Sara (deployed baseline)": f"{sara['sara']['bonafide_fpr'] * 100:.1f}%", "Spectra (FP32)": f"{sara['spectra']['bonafide_fpr'] * 100:.1f}%"},
+                        {"Metric": "EER", "Sara (deployed baseline)": f"{sara['sara']['eer'] * 100:.1f}%", "Spectra (FP32)": f"{sara['spectra']['eer'] * 100:.1f}%"},
+                    ],
+                    numeric_columns={"Sara (deployed baseline)", "Spectra (FP32)"},
                 )
                 st.caption(sara.get("note", ""))
 
@@ -162,7 +153,9 @@ def render() -> None:
             }
             for cond, m in robustness["conditions"].items()
         ]
-        st.dataframe(rows, width="stretch", hide_index=True)
+        render_professional_table(
+            ["Condition", "EER", "ROC-AUC", "Bonafide FPR"], rows, numeric_columns={"EER", "ROC-AUC", "Bonafide FPR"}
+        )
 
     _render_threshold_explorer(int8_eval)
 

@@ -176,6 +176,78 @@ def step_flow_html(steps: list[tuple[str, str, str]], tags: list[str] | None = N
     return f'<div class="adf-steps">{"".join(cards)}</div>'
 
 
+def status_chip_html(value: str) -> str:
+    """A compact semantic chip for a table status/result cell. Falls back
+    to a neutral chip for any value not in STATUS_CHIP_TOKENS (e.g. a
+    filename or a free-text label accidentally passed here) -- text is
+    always shown, color is never the only signal."""
+    from app.styles import STATUS_CHIP_TOKENS
+
+    key = str(value).strip().upper()
+    tokens = STATUS_CHIP_TOKENS.get(key)
+    if tokens is None:
+        return _html.escape(str(value))
+    style_vars = f"--adf-chip-fg:{tokens['fg']};--adf-chip-bg:{tokens['bg']};--adf-chip-border:{tokens['border']};"
+    return f'<span class="adf-chip" style="{style_vars}">{_html.escape(str(value))}</span>'
+
+
+def professional_table_html(
+    columns: list[str],
+    rows: list[dict],
+    *,
+    numeric_columns: frozenset[str] | set[str] = frozenset(),
+    status_columns: frozenset[str] | set[str] = frozenset(),
+    stack_on_mobile: bool = False,
+    empty_text: str = "—",
+) -> str:
+    """Builds a single professionally-styled HTML table (`.adf-table`)
+    shared by every tabular result in the app (segment evidence, batch
+    analysis, robustness, evaluation comparisons, session history) so no
+    page hand-rolls its own table markup or relies on the default
+    Streamlit dataframe look.
+
+    `numeric_columns` right-aligns and mono-spaces a column (percentages,
+    durations, counts). `status_columns` renders values in that column as
+    semantic chips via `status_chip_html` (BONAFIDE/SPOOF/INCONCLUSIVE/
+    GOOD/LIMITED/POOR/etc.) -- any other value degrades to plain escaped
+    text, never a blank cell.
+    """
+    header_cells = "".join(
+        f'<th class="{"adf-th-num" if col in numeric_columns else ""}">{_html.escape(col)}</th>' for col in columns
+    )
+    body_rows = []
+    for row in rows:
+        cells = []
+        for col in columns:
+            value = row.get(col)
+            if value is None or value == "":
+                cells.append(f'<td class="{"adf-td-num" if col in numeric_columns else ""}">{empty_text}</td>')
+                continue
+            if col in status_columns:
+                cells.append(f"<td>{status_chip_html(value)}</td>")
+            else:
+                css_class = "adf-td-num" if col in numeric_columns else ""
+                cells.append(f'<td class="{css_class}">{_html.escape(str(value))}</td>')
+        body_rows.append(f"<tr>{''.join(cells)}</tr>")
+
+    table_class = "adf-table adf-table--stack-on-mobile" if stack_on_mobile else "adf-table"
+    table_html = f'<table class="{table_class}"><thead><tr>{header_cells}</tr></thead><tbody>{"".join(body_rows)}</tbody></table>'
+
+    kv_cards_html = ""
+    if stack_on_mobile:
+        cards = []
+        for row in rows:
+            kv_rows = "".join(
+                f'<div class="adf-kv-row"><span class="adf-kv-key">{_html.escape(col)}</span>'
+                f'<span class="adf-kv-val">{status_chip_html(row.get(col)) if col in status_columns and row.get(col) not in (None, "") else _html.escape(str(row.get(col))) if row.get(col) not in (None, "") else empty_text}</span></div>'
+                for col in columns
+            )
+            cards.append(f'<div class="adf-kv-card">{kv_rows}</div>')
+        kv_cards_html = "".join(cards)
+
+    return f'<div class="adf-table-wrap">{table_html}</div>{kv_cards_html}'
+
+
 def info_callout_html(text: str) -> str:
     return f'<div class="adf-callout">{text}</div>'
 
@@ -323,6 +395,27 @@ def render_evidence_panel(sentences: list[str]) -> None:
 
     for sentence in sentences:
         st.markdown(f"- {sentence}")
+
+
+def render_professional_table(
+    columns: list[str],
+    rows: list[dict],
+    *,
+    numeric_columns: frozenset[str] | set[str] = frozenset(),
+    status_columns: frozenset[str] | set[str] = frozenset(),
+    stack_on_mobile: bool = False,
+) -> None:
+    """The single reusable table renderer for every result table in the
+    app -- see professional_table_html for the styling contract. Use this
+    instead of st.dataframe wherever results are shown."""
+    import streamlit as st
+
+    st.markdown(
+        professional_table_html(
+            columns, rows, numeric_columns=numeric_columns, status_columns=status_columns, stack_on_mobile=stack_on_mobile
+        ),
+        unsafe_allow_html=True,
+    )
 
 
 def render_info_callout(text: str) -> None:

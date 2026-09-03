@@ -21,6 +21,15 @@ from app.analysis.evidence import (
     evidence_summary_sentences,
     segment_table,
 )
+from app.analysis.input_sources import (
+    SOURCE_MICROPHONE,
+    NormalizedAudioInput,
+    from_microphone,
+    from_uploaded_file,
+    from_video,
+    from_voice_note,
+    probe_video,
+)
 from app.analysis.session import build_session_entry, get_session_entries, record_analysis
 from app.components import (
     probability_comparison_html,
@@ -33,6 +42,7 @@ from app.components import (
     render_hero,
     render_how_it_works,
     render_metric_cards,
+    render_professional_table,
     render_result_panel,
     render_section_title,
     render_why_model,
@@ -41,8 +51,16 @@ from app.components import (
 from app.errors import UserFacingError
 from app.formatting import result_summary
 from app.model_loader import DEPLOYMENT_MODEL_ID, get_detector
+from app.reporting.pdf_report import build_pdf_report
 from app.reporting.report import build_report_data, render_html_report, render_json_report
-from app.validation import MAX_DURATION_SECONDS, MAX_FILE_SIZE_BYTES, validate_and_load_upload
+from app.validation import (
+    MAX_DURATION_SECONDS,
+    MAX_FILE_SIZE_BYTES,
+    MAX_VIDEO_ANALYSIS_WINDOW_SECONDS,
+    MAX_VIDEO_FILE_SIZE_BYTES,
+    SUPPORTED_VIDEO_EXTENSIONS,
+    SUPPORTED_VOICE_NOTE_EXTENSIONS,
+)
 from app.visualizations import plot_mel_spectrogram, plot_segment_timeline, plot_waveform
 from audio_deepfake_detector.config.models_config import load_models_config
 
@@ -86,17 +104,26 @@ def _render_analysis_session_panel() -> None:
         if not entries:
             st.caption("No analyses performed yet in this session.")
             return
+        from app.analysis.input_sources import SOURCE_LABELS
+
         rows = [
             {
                 "Time": e["timestamp"],
                 "Filename": e["filename"],
+                "Source": SOURCE_LABELS.get(e.get("source_type", "audio_file"), "Audio File"),
                 "Result": e["presentation_state"],
                 "Spoof %": f"{e['spoof_probability'] * 100:.1f}%",
                 "Segments": e["n_segments"],
             }
             for e in entries
         ]
-        st.dataframe(rows, width="stretch", hide_index=True)
+        render_professional_table(
+            ["Time", "Filename", "Source", "Result", "Spoof %", "Segments"],
+            rows,
+            numeric_columns={"Spoof %", "Segments"},
+            status_columns={"Result"},
+            stack_on_mobile=True,
+        )
         col1, col2 = st.columns(2)
         from app.analysis.session import export_session_summary
 
@@ -236,7 +263,12 @@ def _render_segment_evidence(audio_sample, segment_probs, calibrated_threshold) 
             }
             for r in rows
         ]
-        st.dataframe(display_rows, width="stretch", hide_index=True)
+        render_professional_table(
+            ["Segment", "Time range", "Bonafide probability", "Spoof probability", "Interpretation"],
+            display_rows,
+            numeric_columns={"Segment", "Bonafide probability", "Spoof probability"},
+            status_columns={"Interpretation"},
+        )
 
     with st.expander("Inspect a specific segment"):
         options = [f"Segment {r['segment']} ({r['start_seconds']:.1f}s–{r['end_seconds']:.1f}s)" for r in rows]
@@ -260,11 +292,139 @@ def _render_segment_evidence(audio_sample, segment_probs, calibrated_threshold) 
     return rows, agreement
 
 
+def _handle_input_error(exc: UserFacingError) -> None:
+    _render_error(exc.friendly_message)
+    if exc.technical_detail:
+        logger.warning("Input validation failed: %s", exc.technical_detail)
+
+
+def _source_audio_file() -> tuple[NormalizedAudioInput | None, bytes | None]:
+    uploaded = st.file_uploader(
+        "Supported: WAV · MP3 · FLAC — up to "
+        f"{MAX_DURATION_SECONDS:.0f} seconds and {MAX_FILE_SIZE_BYTES // (1024 * 1024)} MB",
+        type=["wav", "mp3", "flac"],
+        key="_src_audio_file",
+    )
+    if uploaded is None:
+        return None, None
+    data = uploaded.getvalue()
+    try:
+        return from_uploaded_file(data, uploaded.name), data
+    except UserFacingError as exc:
+        _handle_input_error(exc)
+        return None, None
+
+
+def _source_microphone() -> tuple[NormalizedAudioInput | None, bytes | None]:
+    render_section_title(
+        "Record audio",
+        "Record speech directly through your device microphone, or play suspicious audio from another "
+        "device and capture a short sample.",
+    )
+    st.caption(
+        "Microphone capture introduces room, speaker and microphone effects that may affect detection "
+        "performance."
+    )
+    recording = st.audio_input("Acoustic capture", sample_rate=16000, key="_src_microphone")
+    if recording is None:
+        return None, None
+    data = recording.getvalue()
+    try:
+        return from_microphone(data), data
+    except UserFacingError as exc:
+        _handle_input_error(exc)
+        return None, None
+
+
+def _source_voice_note() -> tuple[NormalizedAudioInput | None, bytes | None]:
+    render_section_title(
+        "Analyze a voice note",
+        "Upload a saved voice message or mobile recording. The audio will be decoded and normalized "
+        "before being analyzed by the same detector.",
+    )
+    st.caption("Supported: " + " · ".join(sorted(ext.lstrip(".").upper() for ext in SUPPORTED_VOICE_NOTE_EXTENSIONS)))
+    uploaded = st.file_uploader(
+        "Upload a voice note",
+        type=sorted(ext.lstrip(".") for ext in SUPPORTED_VOICE_NOTE_EXTENSIONS),
+        key="_src_voice_note",
+    )
+    if uploaded is None:
+        return None, None
+    data = uploaded.getvalue()
+    try:
+        with st.spinner("Decoding voice note..."):
+            normalized_input = from_voice_note(data, uploaded.name)
+        return normalized_input, data
+    except UserFacingError as exc:
+        _handle_input_error(exc)
+        return None, None
+
+
+def _source_video() -> tuple[NormalizedAudioInput | None, bytes | None]:
+    render_section_title(
+        "Video audio analysis",
+        "Extract and analyze the speech track from a video using the audio deepfake detector. Visual "
+        "frames are not analyzed.",
+    )
+    st.caption(
+        f"Supported: MP4 · MOV · MKV · WEBM — up to {MAX_VIDEO_FILE_SIZE_BYTES // (1024 * 1024)} MB. "
+        f"Maximum analyzed audio duration: {MAX_VIDEO_ANALYSIS_WINDOW_SECONDS:.0f} seconds."
+    )
+    uploaded = st.file_uploader(
+        "Upload a video",
+        type=sorted(ext.lstrip(".") for ext in SUPPORTED_VIDEO_EXTENSIONS),
+        key="_src_video",
+    )
+    if uploaded is None:
+        return None, None
+    data = uploaded.getvalue()
+    try:
+        probed = probe_video(data, uploaded.name)
+    except UserFacingError as exc:
+        _handle_input_error(exc)
+        return None, None
+
+    st.video(data)
+    render_professional_table(
+        ["Field", "Value"],
+        [
+            {"Field": "Filename", "Value": uploaded.name},
+            {"Field": "Container", "Value": probed.container},
+            {"Field": "Video codec", "Value": probed.video_codec or "Not available"},
+            {"Field": "Audio codec", "Value": probed.audio_codec},
+            {"Field": "Video duration", "Value": f"{probed.duration_seconds:.1f} s" if probed.duration_seconds else "Not available"},
+            {"Field": "File size", "Value": f"{len(data) / (1024 * 1024):.1f} MB"},
+        ],
+    )
+
+    total_duration = probed.duration_seconds or 0.0
+    window_seconds = min(MAX_VIDEO_ANALYSIS_WINDOW_SECONDS, total_duration) if total_duration else MAX_VIDEO_ANALYSIS_WINDOW_SECONDS
+    if total_duration > MAX_VIDEO_ANALYSIS_WINDOW_SECONDS:
+        start_seconds = st.slider(
+            "Analyze from",
+            min_value=0.0,
+            max_value=float(total_duration - MAX_VIDEO_ANALYSIS_WINDOW_SECONDS),
+            value=0.0,
+            step=1.0,
+            format="%.0f s",
+            key="_src_video_start",
+        )
+    else:
+        start_seconds = 0.0
+    st.caption(f"Analysis window: {start_seconds:.0f}s – {start_seconds + window_seconds:.0f}s")
+
+    try:
+        with st.spinner("Extracting selected audio and normalizing..."):
+            normalized_input = from_video(data, uploaded.name, start_seconds=start_seconds, window_seconds=window_seconds)
+    except UserFacingError as exc:
+        _handle_input_error(exc)
+        return None, None
+    return normalized_input, data
+
+
 def render() -> None:
     config = load_models_config()
     model_config = config.get(DEPLOYMENT_MODEL_ID)
-
-    uploaded_file = st.session_state.get("_analyze_uploaded_file")
 
     if not st.session_state.get("_has_uploaded_before"):
         render_hero()
@@ -272,15 +432,29 @@ def render() -> None:
         render_capability_strip()
         st.divider()
 
-    render_section_title("Analyze a recording", "Upload speech audio for anti-spoofing analysis.")
-    uploaded_file = st.file_uploader(
-        "Supported: WAV · MP3 · FLAC — up to "
-        f"{MAX_DURATION_SECONDS:.0f} seconds and {MAX_FILE_SIZE_BYTES // (1024 * 1024)} MB",
-        type=["wav", "mp3", "flac"],
+    render_section_title("Analyze a recording", "Choose an input source for anti-spoofing analysis.")
+    source_choice = st.segmented_control(
+        "Input source",
+        options=["Audio File", "Microphone", "Voice Note", "Video"],
+        default="Audio File",
+        label_visibility="collapsed",
+        key="_analyze_source",
     )
+    if not source_choice:
+        source_choice = "Audio File"
+
+    source_fns = {
+        "Audio File": _source_audio_file,
+        "Microphone": _source_microphone,
+        "Voice Note": _source_voice_note,
+        "Video": _source_video,
+    }
+    normalized_input, preview_bytes = source_fns[source_choice]()
+    is_video_source = source_choice == "Video"
+
     st.caption("Processed for the current session and not intentionally retained.")
 
-    if uploaded_file is None:
+    if normalized_input is None:
         _render_recommended_input()
         st.divider()
         render_feature_grid()
@@ -294,36 +468,40 @@ def render() -> None:
 
     st.session_state["_has_uploaded_before"] = True
 
-    file_bytes = uploaded_file.getvalue()
-    file_key = hashlib.sha256(file_bytes).hexdigest()
+    audio_sample = normalized_input.audio_sample
+    filename = normalized_input.display_filename
+    file_bytes = preview_bytes
+    file_key = f"{normalized_input.source_type}:{normalized_input.sha256}"
 
-    try:
-        audio_sample = validate_and_load_upload(file_bytes, uploaded_file.name)
-    except UserFacingError as exc:
-        _render_error(exc.friendly_message)
-        if exc.technical_detail:
-            logger.warning("Upload validation failed: %s", exc.technical_detail)
-        render_disclaimer()
-        render_footer()
-        return
-
-    workspace_col, meta_col = st.columns([2, 1])
-    with workspace_col:
-        st.audio(file_bytes)
-    with meta_col:
+    if not is_video_source:
+        workspace_col, meta_col = st.columns([2, 1])
+        with workspace_col:
+            st.audio(file_bytes)
+        with meta_col:
+            st.markdown(
+                f"""
+| | |
+|---|---|
+| Filename | {filename} |
+| Duration | {audio_sample.duration_seconds:.2f} s |
+| Sample rate | {audio_sample.sample_rate} Hz |
+| Source | {normalized_input.source_label} |
+| File size | {len(file_bytes) / 1024:.0f} KB |
+            """
+            )
+    else:
         st.markdown(
             f"""
 | | |
 |---|---|
-| Filename | {uploaded_file.name} |
-| Duration | {audio_sample.duration_seconds:.2f} s |
-| Sample rate | {audio_sample.sample_rate} Hz |
-| Format | {Path(uploaded_file.name).suffix.lstrip('.').upper()} |
-| File size | {len(file_bytes) / 1024:.0f} KB |
+| Extracted audio duration | {audio_sample.duration_seconds:.2f} s |
+| Analyzed interval | {normalized_input.source_metadata['selected_interval']} |
+| Source | {normalized_input.source_label} |
             """
         )
 
-    analyze_clicked = st.button("Analyze Audio", type="primary")
+    analyze_label = "Analyze Recording" if normalized_input.source_type == SOURCE_MICROPHONE else "Analyze Audio"
+    analyze_clicked = st.button(analyze_label, type="primary")
 
     if analyze_clicked:
         with st.status("Preparing detector...", expanded=False) as status:
@@ -363,7 +541,9 @@ def render() -> None:
         st.session_state["last_result_file_key"] = file_key
         st.session_state["last_segment_probs"] = segment_probs
         st.session_state["last_audio_sample"] = audio_sample
-        st.session_state["last_filename"] = uploaded_file.name
+        st.session_state["last_filename"] = filename
+        st.session_state["last_source_type"] = normalized_input.source_type
+        st.session_state["last_source_metadata"] = normalized_input.source_metadata
         st.session_state.pop("robustness_results", None)
 
         model_info_for_session = detector.model_info()
@@ -372,11 +552,11 @@ def render() -> None:
         record_analysis(
             st.session_state,
             build_session_entry(
-                filename=uploaded_file.name,
-                sha256=file_key,
+                filename=filename,
+                sha256=normalized_input.sha256,
                 duration_seconds=audio_sample.duration_seconds,
                 sample_rate=audio_sample.sample_rate,
-                audio_format=Path(uploaded_file.name).suffix.lstrip(".").upper(),
+                audio_format=normalized_input.source_metadata.get("format", Path(filename).suffix.lstrip(".").upper()),
                 presentation_state=summary_for_session["presentation_state"],
                 bonafide_probability=result.probabilities["bonafide"],
                 spoof_probability=result.probabilities["spoof"],
@@ -384,6 +564,7 @@ def render() -> None:
                 model_revision=model_config.revision,
                 n_segments=len(segment_probs) if segment_probs else 1,
                 segment_agreement_level=agreement_for_session.level if agreement_for_session else None,
+                source_type=normalized_input.source_type,
             ),
         )
 
@@ -405,6 +586,13 @@ def render() -> None:
         result_col, detail_col = st.columns([2, 1])
         with result_col:
             render_result_panel(state, summary["prediction"], _explanation_for_state(state), extra_html)
+            st.caption(f"SOURCE · {normalized_input.source_label}")
+            if normalized_input.source_type == SOURCE_MICROPHONE:
+                st.caption(
+                    "Acoustic capture advisory: audio recorded through a loudspeaker and microphone may "
+                    "differ substantially from the original source. Room acoustics, playback equipment, "
+                    "microphone processing and background noise can affect detector output."
+                )
         with detail_col:
             st.markdown("**Analysis details**")
             st.markdown(
@@ -424,7 +612,9 @@ def render() -> None:
                 st.markdown(f"- {sentence}")
 
         st.divider()
-        quality, suitability = _render_audio_metadata_inspector(audio_sample, file_bytes, uploaded_file.name, n_segments, model_info)
+        metadata_probe_bytes = file_bytes if file_bytes is not None else audio_sample.waveform.tobytes()
+        metadata_probe_filename = filename if file_bytes is not None else "clip.wav"
+        quality, suitability = _render_audio_metadata_inspector(audio_sample, metadata_probe_bytes, metadata_probe_filename, n_segments, model_info)
 
         if segment_probs:
             rows, agreement = _render_segment_evidence(audio_sample, segment_probs, calibrated_threshold)
@@ -457,11 +647,11 @@ def render() -> None:
         report_rows = segment_table(segment_probs, calibrated_threshold, audio_sample.duration_seconds) if segment_probs else []
         report_data = build_report_data(
             generated_at=datetime.now(),
-            filename=uploaded_file.name,
-            file_sha256=file_key,
+            filename=filename,
+            file_sha256=normalized_input.sha256,
             duration_seconds=audio_sample.duration_seconds,
             sample_rate=audio_sample.sample_rate,
-            audio_format=Path(uploaded_file.name).suffix.lstrip(".").upper(),
+            audio_format=normalized_input.source_metadata.get("format", Path(filename).suffix.lstrip(".").upper()),
             channels=1,
             presentation_state=state,
             prediction_label=summary["prediction"],
@@ -476,12 +666,19 @@ def render() -> None:
             suitability_level=suitability.level,
             model_info=model_info | {"repository": result.model_repository, "revision": model_config.revision},
             inference_time_ms=result.inference_time_ms,
+            source_type=normalized_input.source_type,
+            source_metadata=normalized_input.source_metadata,
         )
-        report_col1, report_col2 = st.columns(2)
+        report_col1, report_col2, report_col3 = st.columns(3)
+        with st.spinner("Generating report..."):
+            pdf_bytes = build_pdf_report(report_data)
         report_col1.download_button(
-            "Download HTML report", data=render_html_report(report_data), file_name=f"{report_data['report_id']}.html", mime="text/html"
+            "Download PDF Report", data=pdf_bytes, file_name=f"{report_data['report_id']}.pdf", mime="application/pdf", type="primary"
         )
         report_col2.download_button(
+            "Download HTML report", data=render_html_report(report_data), file_name=f"{report_data['report_id']}.html", mime="text/html"
+        )
+        report_col3.download_button(
             "Download JSON export", data=render_json_report(report_data), file_name=f"{report_data['report_id']}.json", mime="application/json"
         )
         st.caption(f"Report ID: {report_data['report_id']} — a local reproducibility identifier, not a database reference.")
