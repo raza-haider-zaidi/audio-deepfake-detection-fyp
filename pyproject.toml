@@ -4,7 +4,6 @@ version = "0.1.0"
 description = "Detecting AI-generated and cloned voices: a deep learning system for robust audio deepfake detection"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
-license = { text = "MIT" }
 
 # CPU-only ML/audio dependencies for pretrained Wav2Vec2 deepfake detector
 # integration/benchmarking (Phase 2), plus the Streamlit presentation layer
