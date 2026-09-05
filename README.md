@@ -4,8 +4,7 @@
 
 Final-year Computer Science project. Author: **Syed Raza Haider Zaidi**.
 
-Branch: `feat/spectra-streamlit-candidate` — the deployed candidate described
-in this README. (`main` tracks an earlier phase; see its own README.)
+Repository: [`raza-haider-zaidi/audio-deepfake-detection-fyp`](https://github.com/raza-haider-zaidi/audio-deepfake-detection-fyp)
 
 ## Purpose
 
@@ -226,10 +225,11 @@ or cookies. Full details in
 
 ## License and third-party attribution
 
-This project's own code is declared MIT-licensed in `pyproject.toml`; a
-standalone `LICENSE` file has not yet been added at the repository root.
-Third-party components retain their own licenses and are not relicensed
-by inclusion here:
+This project's own code does not yet have a declared license — no
+`LICENSE` file exists at the repository root, and no license is declared
+in `pyproject.toml`. All rights are reserved by the author pending an
+explicit license decision. Third-party components retain their own
+licenses and are not relicensed by inclusion here:
 
 - Model weights: Apache-2.0 (see `configs/models.yaml` for exact upstream
   attribution and revision).
