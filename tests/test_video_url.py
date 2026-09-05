@@ -250,6 +250,112 @@ def test_debug_flag_can_be_enabled_via_env(monkeypatch):
 
 
 # --------------------------------------------------------------------------
+# Cloud diagnostics logging -- the real yt-dlp failure must reach the
+# server-side log (Streamlit Cloud logs) even though the UI only ever
+# shows the safe, generic message. No network required: yt_dlp.YoutubeDL
+# is replaced with a fake client that raises like the real library would.
+# --------------------------------------------------------------------------
+
+
+def test_sanitize_log_text_redacts_signed_media_url_and_tokens():
+    raw = (
+        "Failed to download https://rr2---sn-abc.googlevideo.com/videoplayback?"
+        "expire=123&sig=AABBCCDD&token=xyz and cookie=super-secret-session"
+    )
+    sanitized = video_url._sanitize_log_text(raw)
+    assert "sig=AABBCCDD" not in sanitized
+    assert "super-secret-session" not in sanitized
+    assert "[signed-media-url-redacted]" in sanitized
+
+
+def test_sanitize_log_text_keeps_plain_public_urls():
+    raw = "extracting https://www.youtube.com/watch?v=abc123"
+    sanitized = video_url._sanitize_log_text(raw)
+    assert "https://www.youtube.com/watch?v=abc123" in sanitized
+
+
+def test_sanitize_log_text_truncates_long_text():
+    sanitized = video_url._sanitize_log_text("x" * 5000, max_length=100)
+    assert len(sanitized) <= 120
+    assert sanitized.endswith("...[truncated]")
+
+
+def test_metadata_failure_logs_category_and_sanitized_error_server_side(monkeypatch, caplog):
+    """The exact bug this patch fixes: previously warning/error yt-dlp
+    output and the classified failure were both logged at DEBUG level,
+    which Streamlit Cloud's default log level drops -- so a real
+    production failure produced NOTHING in the server logs. The failure
+    line must now be emitted at ERROR level with the category, exception
+    type, and a sanitized version of the real error."""
+
+    class _BotChallengeYDL(_FakeYDL):
+        def extract_info(self, url, download=False):
+            raise RuntimeError(
+                "Sign in to confirm you're not a bot. https://accounts.google.com/signin?sig=SECRETVALUE"
+            )
+
+    monkeypatch.setattr(video_url.yt_dlp, "YoutubeDL", _BotChallengeYDL)
+    with caplog.at_level("ERROR", logger="app.analysis.video_url"):
+        with pytest.raises(VideoURLError) as excinfo:
+            video_url.fetch_metadata("https://www.youtube.com/watch?v=abc123")
+
+    # UI-facing message stays safe and generic/specific -- never the raw text.
+    assert "bot" not in str(excinfo.value)
+    assert excinfo.value.category == video_url.YOUTUBE_BOT_CHALLENGE
+
+    failure_records = [r for r in caplog.records if "VIDEO_URL_FAILURE" in r.message]
+    assert failure_records, "expected a VIDEO_URL_FAILURE record at ERROR level"
+    record = failure_records[0]
+    assert record.levelname == "ERROR"
+    assert "category=YOUTUBE_BOT_CHALLENGE" in record.message
+    assert "exception_type=RuntimeError" in record.message
+    assert "sig=SECRETVALUE" not in record.message
+
+
+@requires_ffmpeg
+def test_extraction_failure_logs_category_server_side(monkeypatch, caplog):
+    class _FailingYDL(_DownloadingYDL):
+        def download(self, urls):
+            raise RuntimeError("Requested format is not available")
+
+    monkeypatch.setattr(video_url.yt_dlp, "YoutubeDL", _FailingYDL)
+    with caplog.at_level("ERROR", logger="app.analysis.video_url"):
+        with pytest.raises(VideoURLError):
+            video_url.extract_audio_interval("https://www.youtube.com/watch?v=abc123", start_seconds=0.0, window_seconds=5.0)
+
+    failure_records = [r for r in caplog.records if "VIDEO_URL_FAILURE" in r.message]
+    assert failure_records
+    assert "category=FORMAT_UNAVAILABLE" in failure_records[0].message
+    assert "stage=audio_download" in failure_records[0].message
+
+
+@requires_ffmpeg
+def test_extraction_emits_pre_extraction_diagnostic_line(monkeypatch, caplog):
+    monkeypatch.setattr(video_url.yt_dlp, "YoutubeDL", _DownloadingYDL)
+    with caplog.at_level("INFO", logger="app.analysis.video_url"):
+        video_url.extract_audio_interval("https://www.youtube.com/watch?v=abc123", start_seconds=0.0, window_seconds=5.0)
+
+    diagnostic_records = [r for r in caplog.records if "VIDEO_URL_DIAGNOSTIC" in r.message]
+    assert diagnostic_records, "expected a VIDEO_URL_DIAGNOSTIC record before extraction"
+    assert "video_id=abc123" in diagnostic_records[0].message
+
+
+def test_silent_ydl_logger_routes_warning_and_error_to_matching_log_level(caplog):
+    """Regression guard for the actual production bug: warning()/error()
+    must NOT be downgraded to DEBUG (that is what hid the real cloud
+    failure from the server logs in the first place)."""
+    ydl_logger = video_url._SilentYDLLogger()
+    with caplog.at_level("DEBUG", logger="app.analysis.video_url"):
+        ydl_logger.warning("some yt-dlp warning")
+        ydl_logger.error("some yt-dlp error")
+
+    levels = {r.levelname for r in caplog.records}
+    assert "WARNING" in levels
+    assert "ERROR" in levels
+    assert not any(r.levelname == "DEBUG" and "yt-dlp warning" in r.message for r in caplog.records)
+
+
+# --------------------------------------------------------------------------
 # Extraction (real ffmpeg decode step, fake yt-dlp download)
 # --------------------------------------------------------------------------
 
