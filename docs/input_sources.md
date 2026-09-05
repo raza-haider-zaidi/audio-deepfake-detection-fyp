@@ -154,6 +154,18 @@ changes authenticity detection.
 
 ## 6. Video URL (public online video audio)
 
+**Deployment note:** the deployed Streamlit application now serves this
+feature through a separately-run **local URL ingestion helper** rather
+than calling `yt-dlp` from the Streamlit process itself — see
+`docs/local_url_helper.md` for why and how. Everything below (`app/
+analysis/video_url.py`, the PO-token provider, etc.) remains fully
+accurate as the underlying retrieval logic — it is what the helper
+(`local_helper/youtube.py`) calls internally, and what local development/
+testing still exercises directly — but the Streamlit UI
+(`app/views/analyze.py`) no longer calls it directly; it calls
+`app/analysis/url_helper_client.py` instead, which talks HTTPS to the
+connected helper.
+
 Lets a user paste a link to a **publicly accessible YouTube video**
 (standard watch links, Shorts, `youtu.be`) and analyze a selected portion
 of its audio track — the SAME frozen detector, the SAME normalization

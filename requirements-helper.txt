@@ -1,0 +1,20 @@
+# Dependencies for the LOCAL URL INGESTION HELPER (local_helper/) only --
+# see docs/local_url_helper.md. This is a SEPARATE, much smaller
+# dependency set from the deployed Streamlit application's
+# requirements.txt: it has no ML/inference libraries (no onnxruntime, no
+# huggingface_hub, no streamlit itself) so scripts/build_local_helper.ps1
+# can build it into a standalone Windows executable without bundling any
+# model code.
+#
+# yt-dlp/deno/the PO-token provider moved HERE from requirements.txt --
+# the deployed Streamlit application no longer calls yt-dlp itself for
+# Video URL analysis (see docs/local_url_helper.md, "Why URL retrieval is
+# separated from cloud inference"); only this local helper does, on the
+# machine where YouTube retrieval actually works.
+fastapi==0.121.2
+uvicorn==0.38.0
+pydantic==2.13.4
+numpy==2.5.2
+soundfile==0.14.0
+yt-dlp[default,deno]==2026.8.19
+bgutil-ytdlp-pot-provider==1.3.2

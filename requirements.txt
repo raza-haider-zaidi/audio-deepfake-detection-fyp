@@ -31,41 +31,13 @@ matplotlib==3.11.1
 # app/reporting/pdf_report.py and docs/reporting.md. Small footprint,
 # generates bytes in memory, confirmed Streamlit Community Cloud compatible.
 reportlab==4.2.5
-# Public video URL audio ingestion (YouTube/YouTube Shorts/youtu.be) -- see
-# app/analysis/video_url.py and docs/input_sources.md. Pinned to a recent
-# release because YouTube's delivery behavior changes frequently and older
-# yt-dlp releases stop resolving formats; this is a convenience input
-# adapter only, never a dependency of normal (file/mic/voice-note/video)
-# detector operation. Uses the already-required ffmpeg for any further
-# audio transcoding.
-#
-# Extras:
-#   [default] pulls yt-dlp-ejs (EJS challenge-solver scripts) plus small
-#     pure-Python libs (mutagen, pycryptodomex, brotli, requests, urllib3,
-#     websockets) that current yt-dlp guidance recommends installing --
-#     without it YouTube extraction silently misses formats/streams that
-#     require solving a JS-based signature challenge.
-#   [deno] pulls the `deno` PyPI package, which bundles a real, self-
-#     contained Deno binary (no system package manager / apt step needed,
-#     so it works unmodified on Streamlit Community Cloud). Current yt-dlp
-#     guidance (https://github.com/yt-dlp/yt-dlp/wiki/EJS) recommends Deno
-#     as the preferred JS-challenge-solving runtime for YouTube; without
-#     ANY JS runtime, yt-dlp logs "YouTube extraction without a JS runtime
-#     has been deprecated" and falls back to a more limited player client
-#     that YouTube is more likely to reject or rate-limit, especially from
-#     a datacenter (cloud) IP address -- this was the root cause of the
-#     "Prepare Selected Audio" failure on the Shorts URL that prompted this
-#     pin. Deployment/memory impact: one extra ~40MB wheel (the bundled
-#     Deno binary); it is only invoked on demand, per video-URL analysis
-#     request, not at import time or app startup.
-yt-dlp[default,deno]==2026.8.19
-# Proof-of-Origin (PO) token provider (yt-dlp-side plugin only -- the
-# actual token-generation source is vendored at
-# third_party/bgutil-ytdlp-pot-provider/server/, pinned to the SAME
-# release, and is a separate GPL-3.0-only component; see
-# app/analysis/pot_provider.py and docs/input_sources.md,
-# "Proof-of-Origin token support"). Only used as a fallback retry when the
-# plain native download is declined by YouTube (HTTP 403 / bot-challenge /
-# PO-token-required) -- never for normal requests. Public-content-only:
-# no cookies, no Google account, no proxy.
-bgutil-ytdlp-pot-provider==1.3.2
+# Video URL analysis is served by a separately-run LOCAL URL INGESTION
+# HELPER (local_helper/, see docs/local_url_helper.md), never by this
+# deployed application retrieving YouTube media itself -- Streamlit
+# Community Cloud's datacenter egress IP was found to be reliably blocked
+# by YouTube (HTTP 403) even with a PO-token provider. yt-dlp, the Deno
+# runtime, and the PO-token provider therefore moved to
+# requirements-helper.txt (the helper's own, separate dependency set) --
+# they are no longer installed here. This application only talks HTTPS
+# JSON to a user-connected helper (app/analysis/url_helper_client.py).
+requests==2.34.2
