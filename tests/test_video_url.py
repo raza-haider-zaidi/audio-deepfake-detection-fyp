@@ -222,6 +222,34 @@ def test_input_sources_fetch_video_url_metadata_wraps_user_facing_error(monkeypa
 
 
 # --------------------------------------------------------------------------
+# Developer-only diagnostics (Step 13) -- never shown to end users by default
+# --------------------------------------------------------------------------
+
+
+def test_diagnostics_snapshot_never_raises_and_reports_yt_dlp_version():
+    snapshot = video_url.diagnostics_snapshot()
+    assert snapshot["yt_dlp_version"]
+    assert set(snapshot.keys()) >= {
+        "yt_dlp_version",
+        "yt_dlp_ejs_version",
+        "ffmpeg_path",
+        "js_runtime",
+        "jsc_providers",
+        "po_token_provider",
+    }
+
+
+def test_debug_flag_is_off_by_default(monkeypatch):
+    monkeypatch.delenv(video_url.DEBUG_ENV_VAR, raising=False)
+    assert video_url.is_debug_enabled() is False
+
+
+def test_debug_flag_can_be_enabled_via_env(monkeypatch):
+    monkeypatch.setenv(video_url.DEBUG_ENV_VAR, "1")
+    assert video_url.is_debug_enabled() is True
+
+
+# --------------------------------------------------------------------------
 # Extraction (real ffmpeg decode step, fake yt-dlp download)
 # --------------------------------------------------------------------------
 
@@ -320,7 +348,65 @@ def test_extract_audio_interval_wraps_download_failure(monkeypatch):
     with pytest.raises(VideoURLError) as excinfo:
         video_url.extract_audio_interval("https://www.youtube.com/watch?v=abc123", start_seconds=0.0, window_seconds=5.0)
     assert "bot" not in str(excinfo.value)
-    assert "Unable to access this video" in str(excinfo.value)
+    assert excinfo.value.category == video_url.YOUTUBE_BOT_CHALLENGE
+    assert "did not permit" in str(excinfo.value)
+
+
+# --------------------------------------------------------------------------
+# Failure classification (Step 7 of the hardening pass) -- no network
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "raw_message,expected_category",
+    [
+        ("ERROR: Sign in to confirm you're not a bot", video_url.YOUTUBE_BOT_CHALLENGE),
+        ("PO Token required for this request", video_url.PO_TOKEN_REQUIRED),
+        ("No supported JavaScript runtime could be found", video_url.JS_RUNTIME_UNAVAILABLE),
+        ("Requested format is not available", video_url.FORMAT_UNAVAILABLE),
+        ("HTTPSConnectionPool: Read timed out", video_url.NETWORK_TIMEOUT),
+        ("ERROR: [youtube] xyz: This video is unavailable", video_url.SOURCE_UNAVAILABLE),
+        ("ffmpeg exited with a non-zero error", video_url.FFMPEG_FAILED),
+        ("Some completely unexpected extractor error", video_url.EXTRACTION_FAILED),
+    ],
+)
+def test_classify_extraction_error(raw_message, expected_category):
+    assert video_url.classify_extraction_error(RuntimeError(raw_message)) == expected_category
+
+
+def test_every_failure_category_maps_to_a_traceback_free_message():
+    raw = "some internal yt-dlp/ffmpeg detail that must never reach the user"
+    for category in (
+        video_url.SOURCE_UNAVAILABLE,
+        video_url.NO_AUDIO_STREAM,
+        video_url.YOUTUBE_BOT_CHALLENGE,
+        video_url.JS_RUNTIME_UNAVAILABLE,
+        video_url.PO_TOKEN_REQUIRED,
+        video_url.FORMAT_UNAVAILABLE,
+        video_url.NETWORK_TIMEOUT,
+        video_url.EXTRACTION_FAILED,
+        video_url.FFMPEG_FAILED,
+    ):
+        message = video_url._safe_message(category)
+        assert raw not in message
+
+
+@requires_ffmpeg
+def test_extract_audio_interval_uses_download_timeout_not_metadata_timeout(monkeypatch):
+    """Regression guard: the download call must use the (longer)
+    YTDLP_DOWNLOAD_TIMEOUT_SECONDS, not the metadata-only timeout -- using
+    the short metadata timeout for real audio downloads risked premature
+    timeouts on slower connections."""
+    captured_opts = {}
+
+    class _CapturingYDL(_DownloadingYDL):
+        def __init__(self, opts):
+            captured_opts.update(opts)
+            super().__init__(opts)
+
+    monkeypatch.setattr(video_url.yt_dlp, "YoutubeDL", _CapturingYDL)
+    video_url.extract_audio_interval("https://www.youtube.com/watch?v=abc123", start_seconds=0.0, window_seconds=5.0)
+    assert captured_opts["socket_timeout"] == video_url.YTDLP_DOWNLOAD_TIMEOUT_SECONDS
 
 
 # --------------------------------------------------------------------------

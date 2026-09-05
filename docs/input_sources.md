@@ -203,6 +203,61 @@ shown to the user or left in application logs (a silent `yt-dlp` logger
 routes its internal messages to debug-level Python logging instead of
 stdout/stderr).
 
+### JavaScript runtime and format-selection robustness
+
+Modern YouTube extraction requires solving a JavaScript-based signature
+challenge for most formats. Without a JS runtime available, `yt-dlp` logs
+"YouTube extraction without a JS runtime has been deprecated" and falls
+back to a more limited player client — one more likely to be rejected or
+rate-limited, especially from a datacenter/cloud egress IP (this was the
+observed root cause of a real failure: metadata succeeded via the
+lightweight client, but the "Prepare Selected Audio" download step failed).
+`requirements.txt` therefore pins `yt-dlp[default,deno]` — the `deno`
+extra bundles a self-contained Deno binary (current `yt-dlp` guidance's
+preferred JS-challenge runtime; see
+https://github.com/yt-dlp/yt-dlp/wiki/EJS) via a pure pip wheel, requiring
+no system package manager step, so it installs unmodified on Streamlit
+Community Cloud; the `default` extra pulls `yt-dlp-ejs` (the EJS
+challenge-solver scripts) plus the small pure-Python libraries current
+`yt-dlp` expects to have available. Format selection remains
+`"bestaudio/best"` (never a brittle single-container selector like m4a-only
+or mp3-only) — ffmpeg normalizes whatever container is retrieved.
+
+**Documented limitation:** a PO (proof-of-origin) token requirement was
+not observed against the tested public videos in this project's local
+environment; if YouTube begins requiring one from a given deployment's
+egress IP, extraction will surface the same safe "YouTube did not permit
+the application server to retrieve this video's audio" message rather
+than a raw error, but audio retrieval for the affected video will fail
+until (if ever) a PO-token provider is evaluated and added — no such
+provider is installed today, per the explicit "do not add unless actually
+necessary" guidance.
+
+### Failure classification
+
+Every URL-ingestion failure is classified internally (never shown
+verbatim to the user) into one of: `URL_INVALID`, `SOURCE_UNAVAILABLE`,
+`NO_AUDIO_STREAM`, `YOUTUBE_BOT_CHALLENGE`, `JS_RUNTIME_UNAVAILABLE`,
+`PO_TOKEN_REQUIRED`, `FORMAT_UNAVAILABLE`, `NETWORK_TIMEOUT`,
+`EXTRACTION_FAILED`, `FFMPEG_FAILED` (see
+`app/analysis/video_url.py::classify_extraction_error`, a substring-based
+heuristic over the raw — never displayed — exception text). Each category
+maps to a short, professional, traceback-free message; most fall back to
+the generic "Unable to access this video..." message, while a few get a
+more specific one (e.g. missing audio track, or a YouTube-side
+restriction). Classification errors are harmless — every category still
+resolves to a safe message.
+
+### Developer-only diagnostics
+
+`app/analysis/video_url.py::diagnostics_snapshot()` reports the installed
+`yt-dlp`/`yt-dlp-ejs` versions, `ffmpeg` availability, the detected JS
+challenge runtime, available JS-challenge provider names, and PO-token
+provider availability — for operator troubleshooting only. It is never
+called from the normal Streamlit UI; `is_debug_enabled()` gates any future
+debug surface behind the `ADF_VIDEO_URL_DEBUG` environment variable, off
+by default.
+
 ### Public content only
 
 No login, cookie import, or account-credential support of any kind exists
