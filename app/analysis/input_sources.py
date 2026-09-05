@@ -24,6 +24,9 @@ from pathlib import Path
 from typing import Any
 
 from app.analysis.media_ffmpeg import MediaDecodeError, ProbedMedia, extract_video_audio_window, probe_file
+from app.analysis.video_url import VideoURLError, VideoURLMetadata
+from app.analysis.video_url import extract_audio_interval as _extract_url_audio_interval
+from app.analysis.video_url import fetch_metadata as _fetch_url_metadata
 from app.errors import UserFacingError
 from app.validation import (
     MAX_VIDEO_ANALYSIS_WINDOW_SECONDS,
@@ -39,12 +42,14 @@ SOURCE_AUDIO_FILE = "audio_file"
 SOURCE_MICROPHONE = "microphone"
 SOURCE_VOICE_NOTE = "voice_note"
 SOURCE_VIDEO_AUDIO = "video_audio"
+SOURCE_VIDEO_URL = "video_url"
 
 SOURCE_LABELS = {
     SOURCE_AUDIO_FILE: "Audio File",
     SOURCE_MICROPHONE: "Microphone Capture",
     SOURCE_VOICE_NOTE: "Voice Note",
     SOURCE_VIDEO_AUDIO: "Video Audio",
+    SOURCE_VIDEO_URL: "Online Video",
 }
 
 
@@ -170,6 +175,55 @@ def from_video(
             "video_codec": probed.video_codec or "Not available",
             "audio_codec": probed.audio_codec,
             "video_duration_seconds": probed.duration_seconds,
+            "selected_interval": f"{start_seconds:.0f}s–{end_seconds:.0f}s",
+        },
+    )
+
+
+def fetch_video_url_metadata(url: str) -> VideoURLMetadata:
+    """Validate a public video URL and retrieve its real title/duration/
+    uploader/thumbnail metadata -- no media is downloaded. Raises
+    UserFacingError (never a raw extractor exception) on any failure:
+    invalid/unsupported URL, non-public network address, unavailable/
+    private/age-restricted/geo-restricted video, extraction failure, or
+    missing audio track."""
+    try:
+        return _fetch_url_metadata(url)
+    except VideoURLError as exc:
+        raise UserFacingError(str(exc)) from exc
+
+
+def from_video_url(
+    url: str,
+    metadata: VideoURLMetadata,
+    *,
+    start_seconds: float,
+    window_seconds: float = MAX_VIDEO_ANALYSIS_WINDOW_SECONDS,
+) -> NormalizedAudioInput:
+    """Retrieve and normalize ONLY the selected [start, start+window)
+    interval of a public video's audio track -- never the whole source.
+    Visual frames are never retrieved or analyzed. The SHA-256 recorded on
+    the returned input is computed from the actual extracted audio bytes,
+    never from the URL itself."""
+    try:
+        audio_sample, raw_bytes, source_extension = _extract_url_audio_interval(url, start_seconds, window_seconds)
+    except VideoURLError as exc:
+        raise UserFacingError(str(exc)) from exc
+
+    end_seconds = start_seconds + audio_sample.duration_seconds
+    return NormalizedAudioInput(
+        source_type=SOURCE_VIDEO_URL,
+        display_filename=metadata.title or "Online video",
+        audio_sample=audio_sample,
+        sha256=_sha256(raw_bytes),
+        file_size_bytes=len(raw_bytes),
+        source_metadata={
+            "format": source_extension.lstrip(".").upper() or "Not available",
+            "platform": metadata.platform,
+            "source_title": metadata.title,
+            "source_url": metadata.webpage_url,
+            "source_uploader": metadata.uploader or "Not available",
+            "video_duration_seconds": metadata.duration_seconds,
             "selected_interval": f"{start_seconds:.0f}s–{end_seconds:.0f}s",
         },
     )

@@ -31,3 +31,11 @@ matplotlib==3.11.1
 # app/reporting/pdf_report.py and docs/reporting.md. Small footprint,
 # generates bytes in memory, confirmed Streamlit Community Cloud compatible.
 reportlab==4.2.5
+# Public video URL audio ingestion (YouTube/YouTube Shorts/youtu.be) -- see
+# app/analysis/video_url.py and docs/input_sources.md. Pinned to a recent
+# release because YouTube's delivery behavior changes frequently and older
+# yt-dlp releases stop resolving formats; this is a convenience input
+# adapter only, never a dependency of normal (file/mic/voice-note/video)
+# detector operation. Pure Python; uses the already-required ffmpeg for
+# any further audio transcoding.
+yt-dlp==2026.8.19

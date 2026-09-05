@@ -23,14 +23,18 @@ from app.analysis.evidence import (
 )
 from app.analysis.input_sources import (
     SOURCE_MICROPHONE,
+    SOURCE_VIDEO_URL,
     NormalizedAudioInput,
+    fetch_video_url_metadata,
     from_microphone,
     from_uploaded_file,
     from_video,
+    from_video_url,
     from_voice_note,
     probe_video,
 )
 from app.analysis.session import build_session_entry, get_session_entries, record_analysis
+from app.analysis.video_url import VideoURLMetadata
 from app.components import (
     probability_comparison_html,
     render_capability_strip,
@@ -422,6 +426,104 @@ def _source_video() -> tuple[NormalizedAudioInput | None, bytes | None]:
     return normalized_input, data
 
 
+def _format_hms(seconds: float) -> str:
+    seconds = max(0, int(round(seconds)))
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h:02d}:{m:02d}:{s:02d}"
+    return f"{m:02d}:{s:02d}"
+
+
+def _source_video_url() -> tuple[NormalizedAudioInput | None, bytes | None]:
+    render_section_title(
+        "Analyze Online Video Audio",
+        "Paste a public video link to inspect a selected portion of its audio track.",
+    )
+    st.caption(
+        "Supported initially: YouTube · YouTube Shorts. Audio track analysis only. "
+        "No visual deepfake detection."
+    )
+
+    url = st.text_input(
+        "Video URL", key="_src_video_url", placeholder="https://www.youtube.com/watch?v=..."
+    )
+    load_clicked = st.button("Load Video", key="_src_video_url_load")
+
+    if load_clicked:
+        st.session_state.pop("_video_url_metadata", None)
+        st.session_state.pop("_video_url_normalized", None)
+        if not url:
+            _render_error("Please paste a video URL.")
+        else:
+            try:
+                with st.spinner("Retrieving video information..."):
+                    metadata = fetch_video_url_metadata(url)
+                st.session_state["_video_url_metadata"] = metadata
+                st.session_state["_video_url_metadata_url"] = url
+            except UserFacingError as exc:
+                _handle_input_error(exc)
+
+    metadata: VideoURLMetadata | None = st.session_state.get("_video_url_metadata")
+    metadata_url = st.session_state.get("_video_url_metadata_url")
+    if metadata is None or metadata_url != url:
+        return None, None
+
+    if metadata.thumbnail_url:
+        st.image(metadata.thumbnail_url, width=320)
+    render_professional_table(
+        ["Field", "Value"],
+        [
+            {"Field": "Platform", "Value": metadata.platform},
+            {"Field": "Video title", "Value": metadata.title},
+            {
+                "Field": "Duration",
+                "Value": _format_hms(metadata.duration_seconds) if metadata.duration_seconds else "Not available",
+            },
+            {"Field": "Channel / uploader", "Value": metadata.uploader or "Not available"},
+            {"Field": "Audio availability", "Value": "Available"},
+        ],
+    )
+
+    total_duration = metadata.duration_seconds or 0.0
+    window_seconds = min(MAX_VIDEO_ANALYSIS_WINDOW_SECONDS, total_duration) if total_duration else MAX_VIDEO_ANALYSIS_WINDOW_SECONDS
+    if total_duration > MAX_VIDEO_ANALYSIS_WINDOW_SECONDS:
+        start_seconds = st.slider(
+            "Analysis start time",
+            min_value=0.0,
+            max_value=float(total_duration - MAX_VIDEO_ANALYSIS_WINDOW_SECONDS),
+            value=0.0,
+            step=1.0,
+            format="%.0f s",
+            key="_src_video_url_start",
+        )
+    else:
+        start_seconds = 0.0
+    st.caption(
+        f"Video duration: {_format_hms(total_duration)} · "
+        f"Analyzed interval: {_format_hms(start_seconds)} – {_format_hms(start_seconds + window_seconds)}"
+    )
+
+    extract_clicked = st.button("Prepare Selected Audio", key="_src_video_url_extract")
+    cache_key = f"{metadata_url}:{start_seconds:.0f}"
+
+    if extract_clicked:
+        try:
+            with st.spinner("Retrieving and extracting the selected audio interval..."):
+                normalized_input = from_video_url(metadata_url, metadata, start_seconds=start_seconds, window_seconds=window_seconds)
+            st.session_state["_video_url_normalized"] = normalized_input
+            st.session_state["_video_url_normalized_key"] = cache_key
+        except UserFacingError as exc:
+            st.session_state.pop("_video_url_normalized", None)
+            _handle_input_error(exc)
+            return None, None
+
+    normalized_input = st.session_state.get("_video_url_normalized")
+    if normalized_input is not None and st.session_state.get("_video_url_normalized_key") == cache_key:
+        return normalized_input, None
+    return None, None
+
+
 def render() -> None:
     config = load_models_config()
     model_config = config.get(DEPLOYMENT_MODEL_ID)
@@ -435,7 +537,7 @@ def render() -> None:
     render_section_title("Analyze a recording", "Choose an input source for anti-spoofing analysis.")
     source_choice = st.segmented_control(
         "Input source",
-        options=["Audio File", "Microphone", "Voice Note", "Video"],
+        options=["Audio File", "Microphone", "Voice Note", "Video", "Video URL"],
         default="Audio File",
         label_visibility="collapsed",
         key="_analyze_source",
@@ -448,9 +550,11 @@ def render() -> None:
         "Microphone": _source_microphone,
         "Voice Note": _source_voice_note,
         "Video": _source_video,
+        "Video URL": _source_video_url,
     }
     normalized_input, preview_bytes = source_fns[source_choice]()
     is_video_source = source_choice == "Video"
+    is_video_url_source = source_choice == "Video URL"
 
     st.caption("Processed for the current session and not intentionally retained.")
 
@@ -473,7 +577,29 @@ def render() -> None:
     file_bytes = preview_bytes
     file_key = f"{normalized_input.source_type}:{normalized_input.sha256}"
 
-    if not is_video_source:
+    if is_video_url_source:
+        st.markdown(
+            f"""
+| | |
+|---|---|
+| Platform | {normalized_input.source_metadata.get('platform', 'Not available')} |
+| Video | {normalized_input.source_metadata.get('source_title', filename)} |
+| Extracted audio duration | {audio_sample.duration_seconds:.2f} s |
+| Analyzed interval | {normalized_input.source_metadata['selected_interval']} |
+| Source | {normalized_input.source_label} |
+            """
+        )
+    elif is_video_source:
+        st.markdown(
+            f"""
+| | |
+|---|---|
+| Extracted audio duration | {audio_sample.duration_seconds:.2f} s |
+| Analyzed interval | {normalized_input.source_metadata['selected_interval']} |
+| Source | {normalized_input.source_label} |
+            """
+        )
+    else:
         workspace_col, meta_col = st.columns([2, 1])
         with workspace_col:
             st.audio(file_bytes)
@@ -489,16 +615,6 @@ def render() -> None:
 | File size | {len(file_bytes) / 1024:.0f} KB |
             """
             )
-    else:
-        st.markdown(
-            f"""
-| | |
-|---|---|
-| Extracted audio duration | {audio_sample.duration_seconds:.2f} s |
-| Analyzed interval | {normalized_input.source_metadata['selected_interval']} |
-| Source | {normalized_input.source_label} |
-            """
-        )
 
     analyze_label = "Analyze Recording" if normalized_input.source_type == SOURCE_MICROPHONE else "Analyze Audio"
     analyze_clicked = st.button(analyze_label, type="primary")

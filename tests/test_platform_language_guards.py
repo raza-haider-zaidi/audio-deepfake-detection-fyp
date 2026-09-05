@@ -52,12 +52,17 @@ def test_about_page_never_makes_unsupported_authenticity_claims():
         assert phrase not in text
 
 
-def test_about_page_shows_active_model_repository_and_revision():
+def test_about_page_shows_active_model_revision_and_neutral_artifact_label():
+    """The About page must reflect the actual active model's revision (not
+    a stale/hardcoded one). The personal Hugging Face hosting-account
+    identifier in `config.repository` must NOT be shown -- only a neutral,
+    professional artifact label (see app/branding.py)."""
     at = _run_view("app.views.about")
     config = load_models_config().get(DEPLOYMENT_MODEL_ID)
     text = _all_text(at)
-    assert config.repository in text
     assert config.revision in text
+    assert config.repository not in text
+    assert "Spectra-AASIST3 INT8 deployment artifact" in text
 
 
 def test_about_page_states_unpublished_status():

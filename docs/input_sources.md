@@ -3,8 +3,9 @@
 Branch: `feat/spectra-streamlit-candidate`. `main` is unmodified.
 
 This document describes the input side of the "multimodal audio inputs
-and premium reporting" phase: four supported input sources (Audio File,
-Microphone, Voice Note, Video Audio) that all converge on the SAME frozen
+and premium reporting" phase and its "public video URL audio analysis"
+follow-up: five supported input sources (Audio File, Microphone, Voice
+Note, Video Audio, Video URL) that all converge on the SAME frozen
 detector via one unified input-adapter architecture. It complements
 `docs/analysis_platform.md` (scientific/architecture baseline) and
 `docs/analysis_platform_v2.md` (visual/navigation baseline) rather than
@@ -26,9 +27,10 @@ below is an INPUT ADAPTER ONLY — it ends by handing a decoded, normalized
 | Microphone | Microphone | `app.analysis.input_sources.from_microphone` | `st.audio_input` (native Streamlit WAV capture) |
 | Voice note | Voice Note | `app.analysis.input_sources.from_voice_note` | WAV, MP3, FLAC (native) + M4A, AAC, OGG, OPUS, WEBM (ffmpeg) |
 | Video audio | Video | `app.analysis.input_sources.from_video` | MP4, MOV, MKV, WEBM (audio track only) |
+| Video URL | Video URL | `app.analysis.input_sources.from_video_url` | Public YouTube links (watch, Shorts, youtu.be) — audio track only |
 
-All four adapters are chosen from a single segmented-control source
-selector on the Analyze page (`app/views/analyze.py`), not four
+All five adapters are chosen from a single segmented-control source
+selector on the Analyze page (`app/views/analyze.py`), not five
 simultaneous upload boxes.
 
 ## 2. Normalization flow
@@ -150,15 +152,129 @@ for analysis: Mono · 16 kHz" — this description is purely descriptive of
 what preprocessing did, and does not imply that normalization improves or
 changes authenticity detection.
 
-## 6. Unified result model
+## 6. Video URL (public online video audio)
+
+Lets a user paste a link to a **publicly accessible YouTube video**
+(standard watch links, Shorts, `youtu.be`) and analyze a selected portion
+of its audio track — the SAME frozen detector, the SAME normalization
+pipeline. **Only YouTube is supported in this phase** — other public
+video platforms are intentionally not claimed as supported, since their
+reliability against the installed `yt-dlp` build has not been verified
+here (the same "never label an unverified format as supported" principle
+already applied to voice notes and video containers).
+
+**This is audio-track analysis only.** No frame of video is ever
+retrieved or decoded for analysis — `app/analysis/video_url.py` only
+resolves and extracts the audio stream.
+
+### Flow
+
+1. The user pastes a URL and clicks **Load Video**. This retrieves real
+   title/duration/uploader/thumbnail metadata via `yt-dlp`
+   (`skip_download=True` — no media is transferred at this step).
+2. If the video is longer than the detector's 30-second analysis window,
+   the user selects a start time with a slider; otherwise the full (short)
+   video is used.
+3. The user clicks **Prepare Selected Audio**. Only then does the app
+   retrieve media — and only the selected interval's audio, not the whole
+   video (see "Minimizing media transfer" below).
+4. The extracted audio converges on the exact same
+   `ffmpeg → load_audio_file()` path used by voice notes and video
+   uploads, then goes through the unmodified frozen detector.
+
+### Supported URL forms
+
+`https://www.youtube.com/watch?v=...`, `https://youtu.be/...`, and
+`https://www.youtube.com/shorts/...` (and the `m.youtube.com` /
+`youtube-nocookie.com` variants) are all recognized as the same YouTube
+extractor — Shorts are not rejected merely because their route differs
+from a standard watch link.
+
+### Reliability: a convenience adapter, not a dependency
+
+Online video ingestion is explicitly a convenience input adapter. Audio
+File, Microphone, Voice Note, and Video File analysis do not import from
+`app/analysis/video_url.py` and are unaffected if YouTube changes its
+delivery behavior or `yt-dlp` needs to be updated. Any retrieval failure —
+unavailable, deleted, private, age-restricted, geo-restricted, anti-bot
+blocked, or a network timeout — surfaces the same professional message
+("Unable to access this video...") with no extractor stack trace ever
+shown to the user or left in application logs (a silent `yt-dlp` logger
+routes its internal messages to debug-level Python logging instead of
+stdout/stderr).
+
+### Public content only
+
+No login, cookie import, or account-credential support of any kind exists
+for this feature. Only media already accessible to the server as public
+content is retrieved — private videos, age-gated content requiring
+sign-in, and geo-restricted content are not and cannot be bypassed.
+
+### Minimizing media transfer
+
+Format selection is restricted to audio-only (`bestaudio/best` — the
+video stream is never requested), and `yt-dlp`'s `download_ranges` /
+`force_keyframes_at_cuts` options are used so that, for formats that
+support ranged retrieval (YouTube's DASH audio streams typically do),
+only approximately the selected interval is actually transferred rather
+than the full source. Verified manually: extracting a 10-second window
+from a public video transferred under 100 KB. **Documented limitation:**
+for a format that does not support ranged retrieval, `yt-dlp` may need to
+retrieve more than the selected interval before extraction; a
+`max_filesize` ceiling (100 MB, matching the video-file upload cap) and a
+socket timeout bound the worst case.
+
+### URL security / SSRF protection
+
+Because this feature accepts arbitrary user-entered URLs,
+`app/analysis/video_url.py::validate_public_video_url` runs BEFORE any
+network request:
+
+- Only `http`/`https` schemes are accepted — `file://`, `ftp://`, `data:`,
+  and `javascript:` are rejected outright.
+- Only a hostname allow-list (`youtube.com`, `youtube-nocookie.com`,
+  `youtu.be`, and their subdomains) is accepted — every other domain is
+  rejected before any DNS lookup or request.
+- The hostname is then resolved and every returned IP address is checked
+  against `ipaddress`'s private/loopback/link-local/multicast/reserved/
+  unspecified predicates — rejecting `localhost`, `127.0.0.0/8`, `::1`,
+  private network ranges, link-local ranges (including the
+  `169.254.169.254` cloud metadata address), before any request is made.
+  This is defense-in-depth on top of the domain allow-list, not a general
+  arbitrary-URL SSRF proxy.
+- A `socket_timeout` and a `max_filesize` ceiling bound every request.
+- **Documented limitation:** per-redirect-hop IP re-validation is not
+  separately implemented — `yt-dlp` manages its own request/redirect
+  handling internally; the domain allow-list plus the upfront DNS/IP check
+  is the primary mitigation.
+- Every `yt-dlp`/`ffmpeg` call uses the Python API / explicit argument
+  lists — never `shell=True`, never a string-concatenated command with a
+  user-supplied URL.
+
+### Source metadata and identity
+
+`source_type = "video_url"` carries `platform`, `source_title`,
+`source_url`, `source_uploader`, `video_duration_seconds`, and
+`selected_interval` in `source_metadata`. The recorded SHA-256 is always
+computed from the **actual extracted audio bytes**, never from the URL —
+the URL is not treated as a proxy for content identity.
+
+### Privacy
+
+For URL analysis, the application retrieves only the public media
+required for the selected analysis interval and temporarily processes its
+audio. The retrieved media is never permanently archived, and no history
+of submitted URLs is stored beyond the current session.
+
+## 7. Unified result model
 
 Regardless of source, `PredictionResult`, segment evidence, audio
 diagnostics, Analysis Session entries, and reports all carry a
-`source_type` (`audio_file` / `microphone` / `voice_note` / `video_audio`)
-and render a "SOURCE" badge/label. See `docs/reporting.md` for how source
-type flows into the PDF/HTML/JSON report.
+`source_type` (`audio_file` / `microphone` / `voice_note` / `video_audio` /
+`video_url`) and render a "SOURCE" badge/label. See `docs/reporting.md`
+for how source type flows into the PDF/HTML/JSON report.
 
-## 7. Security / content handling
+## 8. Security / content handling
 
 - Filenames are never used to construct file-system paths or shell
   commands directly — `tempfile.mkstemp`/`NamedTemporaryFile` generate

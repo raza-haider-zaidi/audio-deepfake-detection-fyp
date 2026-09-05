@@ -96,9 +96,9 @@ footer of every page. No gradients, no decorative imagery, no emoji.
 
 `build_report_data(..., source_type=..., source_metadata=...)` carries
 the same `source_type` used everywhere else in the app
-(`audio_file`/`microphone`/`voice_note`/`video_audio`) and a source
-adapter's `source_metadata` dict straight into both the PDF and the HTML
-report's File Information section:
+(`audio_file`/`microphone`/`voice_note`/`video_audio`/`video_url`) and a
+source adapter's `source_metadata` dict straight into both the PDF and
+the HTML report's File Information section:
 
 - **Audio file:** format only (standard, already-known metadata).
 - **Microphone:** capture type ("Live microphone recording"), requested
@@ -109,10 +109,35 @@ report's File Information section:
   codec, full video duration, and the selected analysis interval (e.g.
   "5s–35s") — the report always states the *analyzed interval*, never
   implies the whole video was analyzed.
+- **Video URL:** platform ("YouTube"), the video's title, the original
+  URL (wrapped, never allowed to overflow the report margins — both the
+  PDF's `Paragraph`-based table cells and the HTML report's
+  `word-break: break-all` rule handle arbitrarily long URLs), the
+  uploader/channel where reliably available, the full source video
+  duration, and the selected analysis interval. The SHA-256 shown is
+  always of the *extracted analysis audio*, not the URL.
 
 The report never claims "Video detected as deepfake" — result language
 is always phrased around "the analyzed audio track" / "the analyzed
 speech", regardless of source.
+
+### Author metadata and neutral technical branding
+
+The PDF's document metadata (Title/Author/Subject, visible in most PDF
+viewers' "Document Properties") is set to "Audio Deepfake Analysis
+Report" / "Syed Raza Haider Zaidi" / "Audio Deepfake Detection Research
+Prototype" via `BaseDocTemplate(..., title=, author=, subject=)`.
+
+The frozen model artifact is hosted on Hugging Face under a repository id
+that includes a personal account name. That identifier remains, unchanged,
+in `configs/models.yaml` and in the code path that actually downloads and
+SHA256-verifies the artifact (renaming it there would not migrate the
+artifact and would break deployment) — but it is never shown to a user.
+`app.branding.display_model_artifact()` maps it to the neutral label
+"Spectra-AASIST3 INT8 deployment artifact" everywhere a report or the
+About page displays the "Model artifact" field, in the PDF, HTML, and
+JSON reports alike (`build_report_data` neutralizes it once, so every
+export format stays consistent by construction).
 
 ### Report ID and privacy
 

@@ -33,6 +33,7 @@ from reportlab.platypus import (
 )
 from reportlab.lib.styles import ParagraphStyle
 
+from app.branding import PROJECT_AUTHOR
 from app.reporting.report import DISCLAIMER_TEXT, SOURCE_DISPLAY_LABELS
 
 # Brand palette -- mirrors app/styles.py COLORS exactly so the PDF and the
@@ -207,7 +208,17 @@ def build_pdf_report(report_data: dict[str, Any]) -> bytes:
     fg, bg = STATE_COLORS.get(presentation_state, STATE_COLORS["INCONCLUSIVE"])
 
     buffer = io.BytesIO()
-    doc = BaseDocTemplate(buffer, pagesize=PAGE_SIZE, topMargin=25 * mm, bottomMargin=20 * mm, leftMargin=MARGIN, rightMargin=MARGIN)
+    doc = BaseDocTemplate(
+        buffer,
+        pagesize=PAGE_SIZE,
+        topMargin=25 * mm,
+        bottomMargin=20 * mm,
+        leftMargin=MARGIN,
+        rightMargin=MARGIN,
+        title="Audio Deepfake Analysis Report",
+        author=PROJECT_AUTHOR,
+        subject="Audio Deepfake Detection Research Prototype",
+    )
     frame = Frame(MARGIN, 20 * mm, PAGE_SIZE[0] - 2 * MARGIN, PAGE_SIZE[1] - 45 * mm, id="body")
 
     def _on_page(canvas, doc):
@@ -271,6 +282,8 @@ def build_pdf_report(report_data: dict[str, Any]) -> bytes:
         ("Channels", str(ai["channels"])),
     ]
     for k, v in (ai.get("source_metadata") or {}).items():
+        if k == "format":
+            continue  # already shown above as the top-level "Format" row
         file_rows.append((k.replace("_", " ").title(), str(v)))
     story.append(_kv_table(file_rows))
 
