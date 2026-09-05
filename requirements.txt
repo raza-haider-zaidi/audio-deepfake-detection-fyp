@@ -59,3 +59,13 @@ reportlab==4.2.5
 #     Deno binary); it is only invoked on demand, per video-URL analysis
 #     request, not at import time or app startup.
 yt-dlp[default,deno]==2026.8.19
+# Proof-of-Origin (PO) token provider (yt-dlp-side plugin only -- the
+# actual token-generation source is vendored at
+# third_party/bgutil-ytdlp-pot-provider/server/, pinned to the SAME
+# release, and is a separate GPL-3.0-only component; see
+# app/analysis/pot_provider.py and docs/input_sources.md,
+# "Proof-of-Origin token support"). Only used as a fallback retry when the
+# plain native download is declined by YouTube (HTTP 403 / bot-challenge /
+# PO-token-required) -- never for normal requests. Public-content-only:
+# no cookies, no Google account, no proxy.
+bgutil-ytdlp-pot-provider==1.3.2

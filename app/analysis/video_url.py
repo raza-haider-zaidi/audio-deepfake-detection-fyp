@@ -43,6 +43,7 @@ from urllib.parse import urlparse
 
 import yt_dlp
 
+from app.analysis import pot_provider
 from app.analysis.media_ffmpeg import MediaDecodeError, extract_video_audio_window
 from audio_deepfake_detector.utils.datatypes import AudioSample
 
@@ -101,15 +102,56 @@ FFMPEG_FAILED = "FFMPEG_FAILED"
 NATIVE_DOWNLOAD_FAILED = "NATIVE_DOWNLOAD_FAILED"
 FFMPEG_LOCAL_PROCESSING_FAILED = "FFMPEG_LOCAL_PROCESSING_FAILED"
 
+# Failure categories specific to the PO-token provider path (see
+# app/analysis/pot_provider.py and docs/input_sources.md, "Proof-of-Origin
+# token support"). Per that doc, an HTTP 403 during native retrieval is no
+# longer collapsed into the generic NATIVE_DOWNLOAD_FAILED fallback when
+# more specific evidence is available:
+#   YOUTUBE_MEDIA_FORBIDDEN -- a 403 occurred and either no PO-token retry
+#     was possible (provider unavailable) or the retry was not attempted.
+#   PO_TOKEN_PROVIDER_UNAVAILABLE -- the provider-backed retry could not
+#     even run (plugin/vendored server/Deno missing, or the one-time
+#     native-dependency install failed).
+#   PO_TOKEN_GENERATION_FAILED -- the provider ran but did not produce a
+#     token for this video.
+#   YOUTUBE_DATACENTER_BLOCK -- ONLY used when a token was confirmed
+#     generated for this exact video and the media request still returned
+#     403 -- i.e. the failure is not explained by a missing token. Never
+#     inferred from a bare 403 alone (see classify_extraction_error).
+YOUTUBE_MEDIA_FORBIDDEN = "YOUTUBE_MEDIA_FORBIDDEN"
+PO_TOKEN_PROVIDER_UNAVAILABLE = "PO_TOKEN_PROVIDER_UNAVAILABLE"
+PO_TOKEN_GENERATION_FAILED = "PO_TOKEN_GENERATION_FAILED"
+YOUTUBE_DATACENTER_BLOCK = "YOUTUBE_DATACENTER_BLOCK"
+
+# Categories that indicate YouTube itself declined the media request (as
+# opposed to a local/network/format problem) -- a provider-backed retry is
+# only worth attempting for these (see extract_audio_interval, Stage A).
+_PROVIDER_RETRY_CATEGORIES = (YOUTUBE_BOT_CHALLENGE, PO_TOKEN_REQUIRED, YOUTUBE_MEDIA_FORBIDDEN)
+
 # Slightly more specific (but still traceback-free, non-alarming) messages
 # for the failure categories a user can act on differently. Every other
 # category falls back to UNAVAILABLE_MESSAGE -- the raw yt-dlp exception
 # text is NEVER shown, only used internally to pick between these.
+#
+# Per docs/input_sources.md, "User-facing failure message" -- once every
+# retrieval avenue (native, then provider-backed) is exhausted, the
+# YouTube-blocked family of categories all point the user at the
+# file-upload fallback rather than a diagnosis they cannot act on ("bot
+# detection" is never claimed unless yt-dlp explicitly reported it as the
+# category, i.e. YOUTUBE_BOT_CHALLENGE).
+_RETRIEVAL_BLOCKED_MESSAGE = (
+    "Online video audio could not be retrieved from this hosting environment. "
+    "You can still analyze the recording by uploading the audio or video file directly."
+)
 _CATEGORY_MESSAGES = {
     NO_AUDIO_STREAM: "No usable audio track was found in this video.",
     JS_RUNTIME_UNAVAILABLE: "Online video extraction is temporarily unavailable on this deployment.",
-    YOUTUBE_BOT_CHALLENGE: "YouTube did not permit the application server to retrieve this video's audio.",
-    PO_TOKEN_REQUIRED: "YouTube did not permit the application server to retrieve this video's audio.",
+    YOUTUBE_BOT_CHALLENGE: _RETRIEVAL_BLOCKED_MESSAGE,
+    PO_TOKEN_REQUIRED: _RETRIEVAL_BLOCKED_MESSAGE,
+    YOUTUBE_MEDIA_FORBIDDEN: _RETRIEVAL_BLOCKED_MESSAGE,
+    PO_TOKEN_PROVIDER_UNAVAILABLE: _RETRIEVAL_BLOCKED_MESSAGE,
+    PO_TOKEN_GENERATION_FAILED: _RETRIEVAL_BLOCKED_MESSAGE,
+    YOUTUBE_DATACENTER_BLOCK: _RETRIEVAL_BLOCKED_MESSAGE,
     FFMPEG_LOCAL_PROCESSING_FAILED: "The retrieved audio could not be processed for analysis.",
 }
 
@@ -136,6 +178,8 @@ def classify_extraction_error(exc: BaseException, *, default: str = EXTRACTION_F
         return FORMAT_UNAVAILABLE
     if "timed out" in text or "timeout" in text:
         return NETWORK_TIMEOUT
+    if "403" in text and "forbidden" in text:
+        return YOUTUBE_MEDIA_FORBIDDEN
     if (
         "video is unavailable" in text
         or "video unavailable" in text
@@ -190,6 +234,15 @@ def is_debug_enabled() -> bool:
 # logged either; only short, explicitly-built diagnostic lines are.
 _SENSITIVE_URL_RE = re.compile(r"https?://[^\s\"'<>]+", re.IGNORECASE)
 _SENSITIVE_PARAM_RE = re.compile(r"(?i)\b(sig|signature|token|po_?token|auth\w*|cookie)=[^\s&\"'<>]+")
+# PO-token generation (see app/analysis/pot_provider.py) surfaces
+# visitorData/dataSyncId/rolloutToken/deviceExperimentId/poToken/
+# integrityToken in yt-dlp's own verbose debug output (e.g. the innertube
+# client-context JSON passed to the token-generation subprocess). None of
+# these -- nor a raw PO token value -- are ever safe to log, even at debug
+# level (see docs/input_sources.md, "Proof-of-Origin token support").
+_SENSITIVE_JSON_FIELD_RE = re.compile(
+    r'(?i)"(visitorData|dataSyncId|rolloutToken|deviceExperimentId|poToken|integrityToken)"\s*:\s*"[^"]*"'
+)
 
 
 def _sanitize_log_text(text: str, *, max_length: int = 600) -> str:
@@ -207,6 +260,7 @@ def _sanitize_log_text(text: str, *, max_length: int = 600) -> str:
 
     sanitized = _SENSITIVE_URL_RE.sub(_redact_url, text)
     sanitized = _SENSITIVE_PARAM_RE.sub(r"\1=[redacted]", sanitized)
+    sanitized = _SENSITIVE_JSON_FIELD_RE.sub(r'"\1": "[redacted]"', sanitized)
     if len(sanitized) > max_length:
         sanitized = sanitized[:max_length] + "...[truncated]"
     return sanitized
@@ -292,6 +346,40 @@ class _SilentYDLLogger:
 
     def error(self, msg: str) -> None:
         logger.error(_sanitize_log_text(msg))
+
+
+class _ProviderAttemptLogger(_SilentYDLLogger):
+    """Same sanitized routing as `_SilentYDLLogger`, plus best-effort
+    detection of yt-dlp's own "Retrieved a gvs PO Token" debug line (see
+    https://github.com/yt-dlp/yt-dlp-wiki/blob/master/PO%20Token%20Guide.md)
+    so the caller can tell PO_TOKEN_GENERATION_FAILED (provider ran, no
+    token) apart from YOUTUBE_DATACENTER_BLOCK (token confirmed generated,
+    media request still failed) without ever logging the token itself --
+    only a boolean is recorded here."""
+
+    def __init__(self) -> None:
+        self.token_generated = False
+
+    def debug(self, msg: str) -> None:
+        if "retrieved a gvs po token" in msg.lower():
+            self.token_generated = True
+        super().debug(msg)
+
+
+def _log_pot_diagnostic(*, provider_available: bool, token_generated: bool | None) -> None:
+    """Server-log-only diagnostic line for the provider-backed retry (see
+    docs/input_sources.md, "Proof-of-Origin token support"). NEVER includes
+    the token value, visitor ID, or any other identifier -- only yes/no
+    flags. `token_generated` is None when the provider-backed attempt was
+    never made (e.g. provider unavailable)."""
+    logger.info(
+        "VIDEO_URL_POT_DIAGNOSTIC provider=%s-%s provider_available=%s player_client=%s token_generated=%s",
+        pot_provider.PROVIDER_NAME,
+        pot_provider.PROVIDER_MODE,
+        "yes" if provider_available else "no",
+        pot_provider.PLAYER_CLIENT,
+        "yes" if token_generated else ("no" if token_generated is not None else "not_attempted"),
+    )
 
 
 def _hostname_allowed(hostname: str) -> bool:
@@ -490,13 +578,72 @@ def extract_audio_interval(
     _log_pre_extraction_diagnostic(url, start_seconds, end_seconds)
     try:
         # --- Stage A: native download of the full audio-only stream ---
+        # First attempt: default client, no PO-token provider involved --
+        # this is the cheap, common-case path (matches step 17 resource
+        # safety: never spawn the provider unless YouTube actually declines
+        # the plain request). Most public videos succeed here.
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 ydl.download([url])
         except Exception as exc:  # noqa: BLE001 -- never leak an extractor traceback to the UI
             category = classify_extraction_error(exc, default=NATIVE_DOWNLOAD_FAILED)
             _log_extraction_failure("native_audio_download", exc, category)
-            raise VideoURLError(_safe_message(category), category=category) from exc
+
+            if category not in _PROVIDER_RETRY_CATEGORIES:
+                # Not a YouTube-blocked-the-request failure (network/
+                # format/timeout/unavailable/etc.) -- a PO-token retry
+                # would not help, so fail as before.
+                raise VideoURLError(_safe_message(category), category=category) from exc
+
+            # --- Stage A retry: ONE provider-backed (PO-token) attempt ---
+            # See app/analysis/pot_provider.py and docs/input_sources.md,
+            # "Proof-of-Origin token support". Never more than this single
+            # retry (step 10, avoid aggressive retries that could worsen
+            # IP-level blocking).
+            ready, reason = pot_provider.ensure_provider_ready()
+            if not ready:
+                logger.error(
+                    "VIDEO_URL_FAILURE stage=native_audio_download_pot_retry "
+                    "category=%s exception_type=ProviderUnavailable sanitized_error=%s",
+                    PO_TOKEN_PROVIDER_UNAVAILABLE,
+                    _sanitize_log_text(reason),
+                )
+                _log_pot_diagnostic(provider_available=False, token_generated=None)
+                raise VideoURLError(
+                    _safe_message(PO_TOKEN_PROVIDER_UNAVAILABLE), category=PO_TOKEN_PROVIDER_UNAVAILABLE
+                ) from exc
+
+            for stray in tmp_dir.glob("source_audio.*"):
+                stray.unlink(missing_ok=True)
+
+            retry_logger = _ProviderAttemptLogger()
+            retry_opts = dict(
+                opts,
+                logger=retry_logger,
+                extractor_args=pot_provider.provider_extractor_args(),
+                # yt-dlp only forwards its internal debug lines (including
+                # the "Retrieved a gvs PO Token" line _ProviderAttemptLogger
+                # watches for) to a custom logger when verbose=True --
+                # `quiet=True` (still set, inherited from `opts`) keeps
+                # this from reaching the terminal/stdout either way.
+                verbose=True,
+            )
+            try:
+                with yt_dlp.YoutubeDL(retry_opts) as ydl:
+                    ydl.download([url])
+            except Exception as exc2:  # noqa: BLE001 -- never leak an extractor traceback to the UI
+                # A token was confirmed generated for this exact video and
+                # the media request STILL failed -- that is not explained
+                # by a missing token, so (and only so) this is classified
+                # as a likely network/IP-level block rather than a generic
+                # PO-token failure (step 11: never infer this from a bare
+                # 403 alone).
+                retry_category = YOUTUBE_DATACENTER_BLOCK if retry_logger.token_generated else PO_TOKEN_GENERATION_FAILED
+                _log_extraction_failure("native_audio_download_pot_retry", exc2, retry_category)
+                _log_pot_diagnostic(provider_available=True, token_generated=retry_logger.token_generated)
+                raise VideoURLError(_safe_message(retry_category), category=retry_category) from exc2
+
+            _log_pot_diagnostic(provider_available=True, token_generated=retry_logger.token_generated)
 
         downloaded = sorted(tmp_dir.glob("source_audio.*"))
         if not downloaded:
@@ -572,11 +719,14 @@ def diagnostics_snapshot() -> dict:
     except Exception:  # noqa: BLE001 -- best-effort only, internal yt-dlp layout may change
         snapshot["jsc_providers"] = "unavailable (internal yt-dlp API not present in this version)"
 
-    try:
-        import bgutil_ytdlp_pot_provider  # noqa: F401
-
-        snapshot["po_token_provider"] = "bgutil-ytdlp-pot-provider (installed)"
-    except ImportError:
-        snapshot["po_token_provider"] = None
+    # Cheap, side-effect-free checks only -- does NOT trigger the (slow,
+    # native-module) one-time `deno install` (see
+    # pot_provider.ensure_provider_ready, which runs lazily only when a
+    # provider-backed retry is actually attempted).
+    snapshot["po_token_provider"] = (
+        f"{pot_provider.PROVIDER_NAME}-{pot_provider.PROVIDER_VERSION} ({pot_provider.PROVIDER_MODE})"
+        if pot_provider.provider_installed()
+        else None
+    )
 
     return snapshot

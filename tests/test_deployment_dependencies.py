@@ -35,10 +35,26 @@ def test_requirements_txt_includes_onnxruntime_and_huggingface_hub():
     assert "streamlit" in lowered
 
 
-def test_packages_txt_is_exactly_ffmpeg():
+def test_packages_txt_matches_the_known_deliberate_apt_dependency_set():
+    """Guards against SILENT/ACCIDENTAL apt dependency creep -- any new
+    entry must be a deliberate, reviewed addition to this exact allow-list,
+    not deleted wholesale. `ffmpeg` is the original entry; the `canvas`
+    build-toolchain packages were added deliberately for the vendored
+    PO-token provider (see app/analysis/pot_provider.py,
+    third_party/bgutil-ytdlp-pot-provider/, and docs/input_sources.md,
+    "Proof-of-Origin token support") and are NOT a random dependency."""
     text = (REPO_ROOT / "packages.txt").read_text(encoding="utf-8")
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    assert lines == ["ffmpeg"]
+    lines = [line.strip() for line in text.splitlines() if line.strip() and not line.strip().startswith("#")]
+    assert lines == [
+        "ffmpeg",
+        "build-essential",
+        "pkg-config",
+        "libcairo2-dev",
+        "libpango1.0-dev",
+        "libjpeg-dev",
+        "libgif-dev",
+        "librsvg2-dev",
+    ]
 
 
 def test_production_import_path_does_not_add_banned_modules_to_sys_modules():

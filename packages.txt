@@ -1,1 +1,21 @@
 ffmpeg
+# Runtime + build dependencies for the `canvas` native npm module used by
+# the vendored bgutil-ytdlp-pot-provider PO-token generation script (see
+# app/analysis/pot_provider.py, third_party/bgutil-ytdlp-pot-provider/, and
+# docs/input_sources.md, "Proof-of-Origin token support"). `canvas` ships
+# prebuilt binaries for common platforms (in which case only the runtime
+# .so files below are actually used) but falls back to compiling from
+# source via node-gyp if no prebuilt matches this exact container image --
+# build-essential/pkg-config/the -dev packages cover that fallback so the
+# one-time lazy `deno install` (see pot_provider.ensure_provider_ready)
+# does not fail either way. This is NOT verified to be sufficient on
+# Streamlit Community Cloud's actual container until a real deployment is
+# tested -- see docs/input_sources.md for the outstanding verification
+# steps.
+build-essential
+pkg-config
+libcairo2-dev
+libpango1.0-dev
+libjpeg-dev
+libgif-dev
+librsvg2-dev

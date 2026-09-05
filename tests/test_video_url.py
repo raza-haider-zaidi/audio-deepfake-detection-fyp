@@ -450,6 +450,12 @@ def test_from_video_url_produces_normalized_input_with_correct_source_type(monke
 
 @requires_ffmpeg
 def test_extract_audio_interval_wraps_download_failure(monkeypatch):
+    # A bot-challenge category is one of the ones that would trigger a
+    # PO-token provider retry (see the dedicated retry tests below) -- keep
+    # this test focused on plain failure-wrapping by forcing "no provider
+    # available", so it always fails on the first (normal) attempt only.
+    monkeypatch.setattr(video_url.pot_provider, "ensure_provider_ready", lambda: (False, "not exercised here"))
+
     class _FailingYDL(_DownloadingYDL):
         def download(self, urls):
             raise RuntimeError("Sign in to confirm you're not a bot")
@@ -458,8 +464,14 @@ def test_extract_audio_interval_wraps_download_failure(monkeypatch):
     with pytest.raises(VideoURLError) as excinfo:
         video_url.extract_audio_interval("https://www.youtube.com/watch?v=abc123", start_seconds=0.0, window_seconds=5.0)
     assert "bot" not in str(excinfo.value)
-    assert excinfo.value.category == video_url.YOUTUBE_BOT_CHALLENGE
-    assert "did not permit" in str(excinfo.value)
+    # With no PO-token provider available, a bot-challenge failure ends up
+    # classified as PO_TOKEN_PROVIDER_UNAVAILABLE (the retry could not even
+    # be attempted) rather than the raw YOUTUBE_BOT_CHALLENGE category --
+    # see test_extract_audio_interval_retries_with_provider_on_forbidden_
+    # then_succeeds and the other dedicated retry tests below for the
+    # provider-available paths.
+    assert excinfo.value.category == video_url.PO_TOKEN_PROVIDER_UNAVAILABLE
+    assert "upload" in str(excinfo.value).lower()
 
 
 # --------------------------------------------------------------------------
@@ -477,6 +489,7 @@ def test_extract_audio_interval_wraps_download_failure(monkeypatch):
         ("HTTPSConnectionPool: Read timed out", video_url.NETWORK_TIMEOUT),
         ("ERROR: [youtube] xyz: This video is unavailable", video_url.SOURCE_UNAVAILABLE),
         ("ffmpeg exited with a non-zero error", video_url.FFMPEG_FAILED),
+        ("ERROR: [youtube] abc123: HTTP Error 403: Forbidden", video_url.YOUTUBE_MEDIA_FORBIDDEN),
         ("Some completely unexpected extractor error", video_url.EXTRACTION_FAILED),
     ],
 )
@@ -498,6 +511,10 @@ def test_every_failure_category_maps_to_a_traceback_free_message():
         video_url.FFMPEG_FAILED,
         video_url.NATIVE_DOWNLOAD_FAILED,
         video_url.FFMPEG_LOCAL_PROCESSING_FAILED,
+        video_url.YOUTUBE_MEDIA_FORBIDDEN,
+        video_url.PO_TOKEN_PROVIDER_UNAVAILABLE,
+        video_url.PO_TOKEN_GENERATION_FAILED,
+        video_url.YOUTUBE_DATACENTER_BLOCK,
     ):
         message = video_url._safe_message(category)
         assert raw not in message
@@ -689,6 +706,151 @@ def test_extract_audio_interval_rejects_known_long_duration_before_download(monk
         )
     assert excinfo.value.category == video_url.SOURCE_UNAVAILABLE
     assert called["download"] is False
+
+
+# --------------------------------------------------------------------------
+# Proof-of-Origin (PO) token provider-backed retry. No network access and
+# no real `deno install`/token generation -- `pot_provider.ensure_provider_
+# ready` is monkeypatched here to isolate extract_audio_interval's RETRY
+# POLICY from the provider's own setup logic (covered separately, and
+# without any network access either, in tests/test_pot_provider.py).
+# --------------------------------------------------------------------------
+
+
+def test_provider_attempt_logger_detects_token_generated_flag(caplog):
+    ydl_logger = video_url._ProviderAttemptLogger()
+    assert ydl_logger.token_generated is False
+    with caplog.at_level("DEBUG", logger="app.analysis.video_url"):
+        ydl_logger.debug("[youtube] abc123: Retrieved a gvs PO Token for mweb client")
+    assert ydl_logger.token_generated is True
+
+
+def test_sanitize_log_text_redacts_visitor_and_session_identifiers():
+    """Step 9: visitorData/dataSyncId/poToken/integrityToken must never
+    reach a log line, even at debug level -- these appear in yt-dlp's own
+    verbose innertube-context debug output during PO-token generation."""
+    raw = (
+        '{"visitorData": "SUPERSECRETVISITORID", "dataSyncId": "sync-abc", '
+        '"poToken": "the-actual-token-value", "rolloutToken": "roll-xyz"}'
+    )
+    sanitized = video_url._sanitize_log_text(raw)
+    assert "SUPERSECRETVISITORID" not in sanitized
+    assert "sync-abc" not in sanitized
+    assert "the-actual-token-value" not in sanitized
+    assert "roll-xyz" not in sanitized
+    assert '"visitorData": "[redacted]"' in sanitized
+
+
+@requires_ffmpeg
+def test_extract_audio_interval_retries_with_provider_on_forbidden_then_succeeds(monkeypatch):
+    monkeypatch.setattr(video_url.pot_provider, "ensure_provider_ready", lambda: (True, ""))
+    constructed_opts = []
+
+    class _FlakyThenSucceedsYDL(_DownloadingYDL):
+        _attempt = {"n": 0}
+
+        def __init__(self, opts):
+            constructed_opts.append(opts)
+            super().__init__(opts)
+
+        def download(self, urls):
+            type(self)._attempt["n"] += 1
+            if type(self)._attempt["n"] == 1:
+                raise RuntimeError("ERROR: HTTP Error 403: Forbidden")
+            super().download(urls)
+
+    monkeypatch.setattr(video_url.yt_dlp, "YoutubeDL", _FlakyThenSucceedsYDL)
+    audio_sample, raw_bytes, ext = video_url.extract_audio_interval(
+        "https://www.youtube.com/watch?v=abc123", start_seconds=0.0, window_seconds=5.0
+    )
+    assert isinstance(audio_sample, AudioSample)
+    assert len(constructed_opts) == 2, "expected exactly one normal attempt + one provider-backed retry"
+    assert "extractor_args" not in constructed_opts[0], "the first (normal) attempt must not use the provider"
+    assert constructed_opts[1]["extractor_args"] == video_url.pot_provider.provider_extractor_args()
+
+
+@requires_ffmpeg
+def test_extract_audio_interval_provider_unavailable_after_forbidden(monkeypatch, caplog):
+    monkeypatch.setattr(video_url.pot_provider, "ensure_provider_ready", lambda: (False, "deno runtime not available"))
+
+    class _ForbiddenYDL(_DownloadingYDL):
+        def download(self, urls):
+            raise RuntimeError("ERROR: HTTP Error 403: Forbidden")
+
+    monkeypatch.setattr(video_url.yt_dlp, "YoutubeDL", _ForbiddenYDL)
+    with caplog.at_level("INFO", logger="app.analysis.video_url"):
+        with pytest.raises(VideoURLError) as excinfo:
+            video_url.extract_audio_interval("https://www.youtube.com/watch?v=abc123", start_seconds=0.0, window_seconds=5.0)
+
+    assert excinfo.value.category == video_url.PO_TOKEN_PROVIDER_UNAVAILABLE
+    assert "upload" in str(excinfo.value).lower()
+    assert any("PO_TOKEN_PROVIDER_UNAVAILABLE" in r.message for r in caplog.records)
+    assert any("VIDEO_URL_POT_DIAGNOSTIC" in r.message and "provider_available=no" in r.message for r in caplog.records)
+
+
+@requires_ffmpeg
+def test_extract_audio_interval_provider_retry_without_token_is_generation_failed(monkeypatch):
+    """The provider-backed retry ran but yt-dlp never reported a generated
+    token -- classified as PO_TOKEN_GENERATION_FAILED, not the more
+    alarming YOUTUBE_DATACENTER_BLOCK (step 11: never infer a datacenter
+    block without positive evidence a token was actually generated)."""
+    monkeypatch.setattr(video_url.pot_provider, "ensure_provider_ready", lambda: (True, ""))
+
+    class _AlwaysForbiddenYDL(_DownloadingYDL):
+        def download(self, urls):
+            raise RuntimeError("ERROR: HTTP Error 403: Forbidden")
+
+    monkeypatch.setattr(video_url.yt_dlp, "YoutubeDL", _AlwaysForbiddenYDL)
+    with pytest.raises(VideoURLError) as excinfo:
+        video_url.extract_audio_interval("https://www.youtube.com/watch?v=abc123", start_seconds=0.0, window_seconds=5.0)
+    assert excinfo.value.category == video_url.PO_TOKEN_GENERATION_FAILED
+
+
+@requires_ffmpeg
+def test_extract_audio_interval_provider_retry_token_generated_but_still_forbidden_is_datacenter_block(monkeypatch, caplog):
+    """Step 15's exact trigger condition: a token WAS confirmed generated
+    for this video, and the media request still failed -- the only
+    situation this codebase classifies as YOUTUBE_DATACENTER_BLOCK."""
+    monkeypatch.setattr(video_url.pot_provider, "ensure_provider_ready", lambda: (True, ""))
+
+    class _TokenGeneratedButForbiddenYDL(_DownloadingYDL):
+        _attempt = {"n": 0}
+
+        def download(self, urls):
+            type(self)._attempt["n"] += 1
+            if type(self)._attempt["n"] == 1:
+                raise RuntimeError("ERROR: HTTP Error 403: Forbidden")
+            self.opts["logger"].debug("[youtube] abc123: Retrieved a gvs PO Token for mweb client")
+            raise RuntimeError("ERROR: HTTP Error 403: Forbidden")
+
+    monkeypatch.setattr(video_url.yt_dlp, "YoutubeDL", _TokenGeneratedButForbiddenYDL)
+    with caplog.at_level("INFO", logger="app.analysis.video_url"):
+        with pytest.raises(VideoURLError) as excinfo:
+            video_url.extract_audio_interval("https://www.youtube.com/watch?v=abc123", start_seconds=0.0, window_seconds=5.0)
+
+    assert excinfo.value.category == video_url.YOUTUBE_DATACENTER_BLOCK
+    assert any("token_generated=yes" in r.message for r in caplog.records)
+
+
+@requires_ffmpeg
+def test_extract_audio_interval_does_not_retry_for_non_youtube_blocked_categories(monkeypatch):
+    """A format/network/ffmpeg-family failure is not something a PO-token
+    retry can fix -- ensure_provider_ready (and its potentially slow
+    one-time install) must never even be consulted for these."""
+
+    def _should_not_be_called():
+        raise AssertionError("ensure_provider_ready should not be called for non-YouTube-blocked failures")
+
+    monkeypatch.setattr(video_url.pot_provider, "ensure_provider_ready", _should_not_be_called)
+
+    class _FormatFailYDL(_DownloadingYDL):
+        def download(self, urls):
+            raise RuntimeError("Requested format is not available")
+
+    monkeypatch.setattr(video_url.yt_dlp, "YoutubeDL", _FormatFailYDL)
+    with pytest.raises(VideoURLError) as excinfo:
+        video_url.extract_audio_interval("https://www.youtube.com/watch?v=abc123", start_seconds=0.0, window_seconds=5.0)
+    assert excinfo.value.category == video_url.FORMAT_UNAVAILABLE
 
 
 # --------------------------------------------------------------------------
