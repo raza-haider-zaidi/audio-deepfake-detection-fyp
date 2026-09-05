@@ -396,20 +396,34 @@ memoized) — only the first time a plain (non-provider) retrieval attempt
 is declined by YouTube, never at import time, app startup, or on every
 request. `canvas` ships prebuilt binaries for common platforms (confirmed
 locally on Windows: the install completed in ~20s using a downloaded
-prebuilt binary, no compiler invoked) but falls back to compiling from
-source via node-gyp if none matches the exact container image — the apt
-packages below cover that fallback. **This exact install step succeeding
-on Streamlit Community Cloud's actual Linux container is UNVERIFIED from
-this development sandbox** — the local proof only shows a real GVS PO
-token can be generated and used end-to-end on this machine (see
-"Local verification" below); the remaining verification steps needed
-after a real Cloud deployment are listed at the end of this section.
+prebuilt binary, no compiler invoked); whether a prebuilt binary also
+exists for Streamlit Community Cloud's exact Linux container (and so
+whether any apt build toolchain is even needed) is **unverified** from
+this sandbox — the local proof only shows a real GVS PO token can be
+generated and used end-to-end on this machine (see "Local verification"
+below).
 
-`packages.txt` was extended with `build-essential`, `pkg-config`,
-`libcairo2-dev`, `libpango1.0-dev`, `libjpeg-dev`, `libgif-dev`, and
-`librsvg2-dev` to cover both the prebuilt-binary case (runtime `.so`
-files, pulled in as dependencies of the `-dev` packages) and the
-from-source compile fallback.
+**`packages.txt` deliberately stays minimal (`ffmpeg` only).** No apt
+build-toolchain packages (`build-essential`, `libcairo2-dev`, etc.) are
+added preemptively for `canvas` — if the lazy install ever fails on Cloud
+for lack of a compiler/library, `ensure_provider_ready` returns
+`(False, <reason>)` and the feature degrades gracefully to
+`PO_TOKEN_PROVIDER_UNAVAILABLE` (the safe upload-fallback message) rather
+than crashing the app, so there is no correctness reason to add packages
+speculatively. **Lesson learned the hard way:** an earlier version of this
+file added those packages WITH explanatory `#` comments directly in
+`packages.txt`; Streamlit Community Cloud's packages.txt installer does
+not strip `#` comments the way plain apt does, and treated every word of
+the comment text as a literal package name ("E: Unable to locate package
+Runtime", "... package `canvas`", etc.), aborting the entire dependency
+install and breaking deployment completely (not just PO-token support) --
+fixed in commit that follows 53e7845. `packages.txt` must therefore
+contain ONLY real package names and nothing else, ever again (enforced by
+`tests/test_deployment_dependencies.py::
+test_packages_txt_lines_look_like_valid_apt_package_names`); if a real
+Cloud deployment log later shows `canvas` failing to compile for lack of a
+specific library, add that exact package (verified against the log, not
+guessed) as its own commit.
 
 **Player client and extractor args:** `pot_provider.provider_extractor_args()`
 returns `{"youtube": {"player_client": ["mweb"]}, "youtubepot-bgutilscript":
@@ -476,9 +490,12 @@ and correct sanitized logging.
 **What is NOT yet verified (requires an actual Streamlit Cloud
 deployment):**
 
-1. Whether `canvas`'s native install (prebuilt-binary or from-source via
-   the new `packages.txt` entries) actually succeeds on Streamlit
-   Community Cloud's specific container image.
+1. Whether `canvas`'s native install succeeds via a prebuilt binary on
+   Streamlit Community Cloud's specific container image with only
+   `packages.txt`'s `ffmpeg` present (no build toolchain) -- if not, the
+   exact missing package must be read from that failure's log line and
+   added deliberately, never guessed in advance (see "Native-dependency
+   install" above for why no build-toolchain packages are pre-added).
 2. Whether the one-time `deno install` completes within Streamlit Cloud's
    free-tier CPU/memory/time limits on a cold container.
 3. Whether a PO token generated this way is actually accepted by YouTube
