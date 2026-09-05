@@ -18,8 +18,8 @@ from pathlib import Path
 
 def _prepend_bundled_tools_to_path() -> None:
     """If a `tools/` directory sits next to this executable (or, in
-    development, next to the repository root), put it at the FRONT of
-    PATH so `shutil.which("cloudflared"/"ffmpeg"/"ffprobe")` -- used
+    development, next to the local_helper/ package), put it at the FRONT
+    of PATH so `shutil.which("cloudflared"/"ffmpeg"/"ffprobe")` -- used
     unchanged by tunnel.py and media_ffmpeg.py -- finds the bundled copies
     first, with no code changes needed in either module. Falls back to
     whatever is already on the system PATH if `tools/` is absent (e.g. a
@@ -28,7 +28,10 @@ def _prepend_bundled_tools_to_path() -> None:
     if getattr(sys, "frozen", False):
         base = Path(sys.executable).resolve().parent
     else:
-        base = Path(__file__).resolve().parent.parent
+        # Development mode: scripts/build_local_helper.ps1 places tools/
+        # directly under local_helper/ (this file's own package
+        # directory), NOT the repository root.
+        base = Path(__file__).resolve().parent
     tools_dir = base / "tools"
     if tools_dir.is_dir():
         os.environ["PATH"] = str(tools_dir) + os.pathsep + os.environ.get("PATH", "")
