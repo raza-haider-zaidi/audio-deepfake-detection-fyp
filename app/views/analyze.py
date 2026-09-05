@@ -25,16 +25,24 @@ from app.analysis.input_sources import (
     SOURCE_MICROPHONE,
     SOURCE_VIDEO_URL,
     NormalizedAudioInput,
-    fetch_video_url_metadata,
+    from_helper_prepared_audio,
     from_microphone,
     from_uploaded_file,
     from_video,
-    from_video_url,
     from_voice_note,
     probe_video,
 )
 from app.analysis.session import build_session_entry, get_session_entries, record_analysis
-from app.analysis.video_url import VideoURLMetadata
+from app.analysis.url_helper_client import (
+    HelperConnection,
+    HelperConnectionError,
+    HelperRequestError,
+    HelperVideoMetadata,
+    decode_connection_code,
+    fetch_metadata_via_helper,
+    prepare_via_helper,
+    verify_connection,
+)
 from app.components import (
     probability_comparison_html,
     render_capability_strip,
@@ -435,6 +443,47 @@ def _format_hms(seconds: float) -> str:
     return f"{m:02d}:{s:02d}"
 
 
+_HELPER_CONNECTION_KEY = "_url_helper_connection"
+
+
+def _render_helper_connection_card() -> HelperConnection | None:
+    """Video URL analysis is served by a local URL ingestion helper the
+    user runs on their own machine (see docs/local_url_helper.md) --
+    Streamlit itself never retrieves YouTube media directly. Returns the
+    verified connection for the current session, or None (having already
+    rendered the connect card) if not yet connected.
+
+    The endpoint and token live ONLY in st.session_state -- never written
+    to Streamlit secrets, a file, or a log line (see
+    app/analysis/url_helper_client.py)."""
+    connection: HelperConnection | None = st.session_state.get(_HELPER_CONNECTION_KEY)
+    if connection is not None:
+        col1, col2 = st.columns([4, 1])
+        with col1:
+            st.caption(f"Local URL helper connected · {connection.endpoint}")
+        with col2:
+            if st.button("Disconnect", key="_url_helper_disconnect"):
+                st.session_state.pop(_HELPER_CONNECTION_KEY, None)
+                st.rerun()
+        return connection
+
+    with st.container(border=True):
+        st.markdown("**Local URL Helper**")
+        st.caption("Video URL analysis uses a local secure helper to retrieve public media.")
+        code = st.text_input("Connection code", key="_url_helper_code", type="password")
+        if st.button("Connect", key="_url_helper_connect"):
+            try:
+                candidate = decode_connection_code(code)
+                with st.spinner("Verifying helper connection..."):
+                    verify_connection(candidate)
+            except (HelperConnectionError, HelperRequestError) as exc:
+                _render_error(str(exc))
+            else:
+                st.session_state[_HELPER_CONNECTION_KEY] = candidate
+                st.rerun()
+    return None
+
+
 def _source_video_url() -> tuple[NormalizedAudioInput | None, bytes | None]:
     render_section_title(
         "Analyze Online Video Audio",
@@ -444,6 +493,17 @@ def _source_video_url() -> tuple[NormalizedAudioInput | None, bytes | None]:
         "Supported initially: YouTube · YouTube Shorts. Audio track analysis only. "
         "No visual deepfake detection."
     )
+
+    connection = _render_helper_connection_card()
+    if connection is None:
+        st.info(
+            "Video URL helper is not connected. Start the Audio Deepfake URL Helper on the "
+            "analysis computer, then connect it here."
+        )
+        st.caption(
+            "Alternatively, download/export the recording and analyze it using Audio File or Video File."
+        )
+        return None, None
 
     url = st.text_input(
         "Video URL", key="_src_video_url", placeholder="https://www.youtube.com/watch?v=..."
@@ -458,13 +518,13 @@ def _source_video_url() -> tuple[NormalizedAudioInput | None, bytes | None]:
         else:
             try:
                 with st.spinner("Retrieving video information..."):
-                    metadata = fetch_video_url_metadata(url)
+                    metadata = fetch_metadata_via_helper(connection, url)
                 st.session_state["_video_url_metadata"] = metadata
                 st.session_state["_video_url_metadata_url"] = url
-            except UserFacingError as exc:
-                _handle_input_error(exc)
+            except (HelperConnectionError, HelperRequestError) as exc:
+                _render_error(str(exc))
 
-    metadata: VideoURLMetadata | None = st.session_state.get("_video_url_metadata")
+    metadata: HelperVideoMetadata | None = st.session_state.get("_video_url_metadata")
     metadata_url = st.session_state.get("_video_url_metadata_url")
     if metadata is None or metadata_url != url:
         return None, None
@@ -510,12 +570,24 @@ def _source_video_url() -> tuple[NormalizedAudioInput | None, bytes | None]:
     if extract_clicked:
         try:
             with st.spinner("Retrieving and extracting the selected audio interval..."):
-                normalized_input = from_video_url(metadata_url, metadata, start_seconds=start_seconds, window_seconds=window_seconds)
+                prepared = prepare_via_helper(connection, metadata_url, start_seconds, window_seconds)
+                normalized_input = from_helper_prepared_audio(
+                    prepared.wav_bytes,
+                    display_filename=prepared.metadata.title,
+                    start_seconds=start_seconds,
+                    window_seconds=window_seconds,
+                    platform=prepared.metadata.platform,
+                    source_title=prepared.metadata.title,
+                    source_url=prepared.metadata.webpage_url,
+                    source_uploader=prepared.metadata.uploader,
+                    video_duration_seconds=prepared.metadata.duration_seconds,
+                    source_format=prepared.source_extension,
+                )
             st.session_state["_video_url_normalized"] = normalized_input
             st.session_state["_video_url_normalized_key"] = cache_key
-        except UserFacingError as exc:
+        except (HelperConnectionError, HelperRequestError) as exc:
             st.session_state.pop("_video_url_normalized", None)
-            _handle_input_error(exc)
+            _render_error(str(exc))
             return None, None
 
     normalized_input = st.session_state.get("_video_url_normalized")
