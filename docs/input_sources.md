@@ -204,6 +204,75 @@ server-side application log (never the UI) — see "Cloud diagnostics
 logging" below; this is deliberate, so a real production failure is
 diagnosable from Streamlit Cloud's server logs.
 
+### Native download / local interval extraction split
+
+A second real Streamlit Cloud production failure occurred after the JS
+runtime fix above: metadata retrieval, Deno, `yt-dlp-ejs`, and `ffmpeg`
+were all confirmed present and working, yet audio retrieval failed with
+`ERROR: ffmpeg exited with code 8` (`VIDEO_URL_FAILURE ... category=
+FFMPEG_FAILED`). Root cause, found by inspecting the exact `yt-dlp`
+options in `extract_audio_interval`: `download_ranges` combined with
+`force_keyframes_at_cuts=True` makes `yt-dlp` invoke `ffmpeg` itself as an
+**external downloader**, running it directly against the **remote signed
+googlevideo.com media URL** to cut the requested interval during
+download — not against a local file. This worked on local Windows
+development but failed against Streamlit Cloud's `ffmpeg` build/sandbox
+network behavior.
+
+Fixed by splitting retrieval into two independent stages, so `ffmpeg` is
+never used as a remote downloader again:
+
+- **Stage A — native download** (`stage=native_audio_download` in logs):
+  `yt-dlp`'s own native (non-ffmpeg) downloader retrieves the full
+  audio-only stream (`format: "bestaudio/best"`, never the video track) to
+  a local temporary file. `download_ranges` and `force_keyframes_at_cuts`
+  are deliberately absent from the options.
+- **Stage B — local interval extraction** (`stage=local_interval_extract`
+  in logs): once the audio track is a **local file**,
+  `app.analysis.media_ffmpeg.extract_video_audio_window` — the same
+  shared, unmodified local-file interval-extraction/normalization utility
+  the Video File source already uses — cuts the selected
+  `[start, start+window)` interval and normalizes it. `ffmpeg` only ever
+  receives a local filesystem `-i` path in this stage; a regression test
+  (`tests/test_video_url.py::test_local_interval_extraction_ffmpeg_input_is_a_local_file`)
+  asserts this directly, and another
+  (`test_native_download_opts_never_configure_ffmpeg_as_remote_downloader`)
+  asserts `download_ranges`/`force_keyframes_at_cuts`/`external_downloader`
+  are never present in the Stage A options, so this failure mode cannot
+  silently return.
+
+**Trade-off, accepted deliberately:** for a long source video, Stage A now
+downloads its full audio-only track before Stage B cuts out the selected
+interval, rather than the old (broken-on-Cloud) approach of asking the
+remote server to serve only the requested byte range. Correctness and
+Streamlit Cloud reliability were prioritized over minimizing transfer for
+this phase. To keep worst-case download size and time bounded,
+`MAX_SOURCE_DURATION_SECONDS` (the "video too long to analyze via a public
+link" cutoff) was tightened from 4 hours to **30 minutes** — comfortably
+under `MAX_URL_DOWNLOAD_BYTES` (100 MB) for typical YouTube audio-only
+bitrates, and checked both by `fetch_metadata` and again by
+`extract_audio_interval` (via a `known_duration_seconds` parameter passed
+from the already-fetched metadata) before Stage A starts, so an
+unexpectedly long source is rejected before any download begins. A future
+phase could revisit partial/ranged native downloading (without invoking
+ffmpeg as the downloader) if bandwidth minimization becomes a priority
+again.
+
+**Failure boundaries:** `NATIVE_DOWNLOAD_FAILED` is the fallback category
+for an unrecognized Stage A failure (a specific failure like
+`YOUTUBE_BOT_CHALLENGE`/`PO_TOKEN_REQUIRED`/`JS_RUNTIME_UNAVAILABLE`/
+`FORMAT_UNAVAILABLE`/`NETWORK_TIMEOUT`/`SOURCE_UNAVAILABLE` is still
+classified more specifically when the raw error text matches).
+`FFMPEG_LOCAL_PROCESSING_FAILED` is used only for a Stage B failure — a
+native download that succeeded but whose local `ffmpeg` processing then
+failed. Keeping these separate means a log line always tells you which
+half of the pipeline actually failed. When Stage B fails, the raw
+(sanitized) `ffmpeg`/`ffprobe` stderr is included in the
+`VIDEO_URL_FAILURE` log line as `ffmpeg_stderr=...` (via
+`MediaDecodeError.stderr`, populated in `app/analysis/media_ffmpeg.py`),
+so a failure is never just an opaque "ffmpeg exited with code 8" without
+context — while the UI-facing message stays the same short, generic text.
+
 ### Cloud diagnostics logging
 
 A first deployment of this feature to Streamlit Community Cloud produced
@@ -222,10 +291,11 @@ lines from `app/analysis/video_url.py`:
 
 - `VIDEO_URL_DIAGNOSTIC: yt_dlp=<version> deno=<runtime or unavailable> ejs=<version or unavailable> ffmpeg=<available/unavailable> platform=youtube video_id=<id> requested_interval=<start>-<end>` —
   emitted immediately before every real audio-retrieval attempt.
-- `VIDEO_URL_FAILURE stage=<metadata|audio_download|ffmpeg_decode> category=<...> exception_type=<...> sanitized_error=<...>` plus a sanitized traceback —
-  emitted whenever metadata retrieval, audio download, or the ffmpeg
-  decode step fails, using the same failure categories as the UI-facing
-  classifier.
+- `VIDEO_URL_FAILURE stage=<metadata|native_audio_download|local_interval_extract> category=<...> exception_type=<...> sanitized_error=<...> [ffmpeg_stderr=<...>]` plus a sanitized traceback —
+  emitted whenever metadata retrieval, the Stage A native download, or the
+  Stage B local ffmpeg interval extraction fails (see "Native download /
+  local interval extraction split" below for what each stage is), using
+  the same failure categories as the UI-facing classifier.
 
 Verbose yt-dlp DEBUG-level chatter (including yt-dlp's own internal
 JS-runtime/player-client detection lines, e.g. "JS runtimes: deno-2.9.6")
@@ -313,16 +383,19 @@ sign-in, and geo-restricted content are not and cannot be bypassed.
 ### Minimizing media transfer
 
 Format selection is restricted to audio-only (`bestaudio/best` — the
-video stream is never requested), and `yt-dlp`'s `download_ranges` /
-`force_keyframes_at_cuts` options are used so that, for formats that
-support ranged retrieval (YouTube's DASH audio streams typically do),
-only approximately the selected interval is actually transferred rather
-than the full source. Verified manually: extracting a 10-second window
-from a public video transferred under 100 KB. **Documented limitation:**
-for a format that does not support ranged retrieval, `yt-dlp` may need to
-retrieve more than the selected interval before extraction; a
-`max_filesize` ceiling (100 MB, matching the video-file upload cap) and a
-socket timeout bound the worst case.
+video stream is never requested). **Superseded by the Cloud-reliability
+fix below:** an earlier version of this module used `yt-dlp`'s
+`download_ranges` / `force_keyframes_at_cuts` options so that only
+approximately the selected interval was transferred; that approach made
+`yt-dlp` invoke `ffmpeg` as an external downloader directly against the
+remote signed media URL, which failed on Streamlit Cloud (see "Native
+download / local interval extraction split"). The full audio-only track
+is now downloaded natively before the selected interval is cut locally —
+**documented trade-off:** for a long source video this means more data is
+transferred than the selected interval alone would require. A
+`max_filesize` ceiling (100 MB, matching the video-file upload cap), a
+socket timeout, and a tightened 30-minute maximum source duration
+(`MAX_SOURCE_DURATION_SECONDS`) bound the worst case.
 
 ### URL security / SSRF protection
 

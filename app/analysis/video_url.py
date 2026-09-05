@@ -43,7 +43,7 @@ from urllib.parse import urlparse
 
 import yt_dlp
 
-from app.analysis.media_ffmpeg import MediaDecodeError, decode_bytes_to_audio_sample
+from app.analysis.media_ffmpeg import MediaDecodeError, extract_video_audio_window
 from audio_deepfake_detector.utils.datatypes import AudioSample
 
 logger = logging.getLogger(__name__)
@@ -52,9 +52,18 @@ logger = logging.getLogger(__name__)
 # Streamlit Community Cloud -- see docs/input_sources.md, "Minimizing
 # media transfer".
 YTDLP_METADATA_TIMEOUT_SECONDS = 20
-YTDLP_DOWNLOAD_TIMEOUT_SECONDS = 90
+# The native downloader now retrieves the FULL audio-only stream (see
+# "Native download / local interval extraction split" below), not just a
+# short ranged slice, so this allows more time than a short clip would need.
+YTDLP_DOWNLOAD_TIMEOUT_SECONDS = 180
 MAX_URL_DOWNLOAD_BYTES = 100 * 1024 * 1024  # safety ceiling, matches the video-file upload cap
-MAX_SOURCE_DURATION_SECONDS = 4 * 60 * 60  # reject absurdly long sources outright
+# Because the whole audio-only track is now downloaded before the selected
+# interval is cut locally, the old 4-hour ceiling (safe under the previous
+# ranged-remote-retrieval design) would let Streamlit Cloud download and
+# hold a very large temporary file. 30 minutes of typical YouTube
+# audio-only formats (~128 kbps) is well under MAX_URL_DOWNLOAD_BYTES and
+# a practical ceiling for a "select a short interval to analyze" feature.
+MAX_SOURCE_DURATION_SECONDS = 30 * 60
 
 # Only these hosts are accepted. Other public video platforms are
 # intentionally NOT claimed as supported in this phase -- see the module
@@ -81,6 +90,16 @@ FORMAT_UNAVAILABLE = "FORMAT_UNAVAILABLE"
 NETWORK_TIMEOUT = "NETWORK_TIMEOUT"
 EXTRACTION_FAILED = "EXTRACTION_FAILED"
 FFMPEG_FAILED = "FFMPEG_FAILED"
+# Two distinct failure boundaries for the two-stage architecture (see
+# "Native download / local interval extraction split" below):
+# NATIVE_DOWNLOAD_FAILED is the fallback category for the yt-dlp native
+# audio-only download stage (a 403/bot-challenge/PO-token/timeout/etc. is
+# still classified more specifically by classify_extraction_error below --
+# this is only the catch-all for that stage). FFMPEG_LOCAL_PROCESSING_FAILED
+# is used ONLY when the native download already succeeded and a LOCAL
+# ffmpeg call (against a local temp file, never a remote URL) then failed.
+NATIVE_DOWNLOAD_FAILED = "NATIVE_DOWNLOAD_FAILED"
+FFMPEG_LOCAL_PROCESSING_FAILED = "FFMPEG_LOCAL_PROCESSING_FAILED"
 
 # Slightly more specific (but still traceback-free, non-alarming) messages
 # for the failure categories a user can act on differently. Every other
@@ -91,16 +110,20 @@ _CATEGORY_MESSAGES = {
     JS_RUNTIME_UNAVAILABLE: "Online video extraction is temporarily unavailable on this deployment.",
     YOUTUBE_BOT_CHALLENGE: "YouTube did not permit the application server to retrieve this video's audio.",
     PO_TOKEN_REQUIRED: "YouTube did not permit the application server to retrieve this video's audio.",
+    FFMPEG_LOCAL_PROCESSING_FAILED: "The retrieved audio could not be processed for analysis.",
 }
 
 
-def classify_extraction_error(exc: BaseException) -> str:
-    """Best-effort classification of a raw yt-dlp/ffmpeg exception into one
-    of the internal failure categories above, using substring matching on
-    the (never-shown-to-the-user) exception text. Used only for diagnostics
-    and for choosing a slightly more specific safe message -- classification
-    mistakes are harmless since every category still maps to a safe,
-    traceback-free message."""
+def classify_extraction_error(exc: BaseException, *, default: str = EXTRACTION_FAILED) -> str:
+    """Best-effort classification of a raw yt-dlp exception into one of the
+    internal failure categories above, using substring matching on the
+    (never-shown-to-the-user) exception text. `default` is the category
+    used when no specific pattern matches -- callers pass a stage-specific
+    default (e.g. NATIVE_DOWNLOAD_FAILED for the download stage) so the
+    fallback itself still identifies which stage failed. Used only for
+    diagnostics and for choosing a slightly more specific safe message --
+    classification mistakes are harmless since every category still maps
+    to a safe, traceback-free message."""
     text = str(exc).lower()
 
     if "sign in to confirm" in text or "not a bot" in text or "confirm you" in text:
@@ -125,7 +148,7 @@ def classify_extraction_error(exc: BaseException) -> str:
         return SOURCE_UNAVAILABLE
     if "ffmpeg" in text and ("error" in text or "failed" in text):
         return FFMPEG_FAILED
-    return EXTRACTION_FAILED
+    return default
 
 
 def _safe_message(category: str) -> str:
@@ -208,13 +231,18 @@ def _video_id_for_logging(url: str) -> str:
 def _log_extraction_failure(stage: str, exc: BaseException, category: str) -> None:
     """The key diagnostic line this module exists to produce: what failed,
     classified how, with the real (sanitized) exception -- server-log-only,
-    never shown in the Streamlit UI."""
+    never shown in the Streamlit UI. If `exc` carries ffmpeg stderr (see
+    MediaDecodeError.stderr), it is included, sanitized, so a local ffmpeg
+    failure is never just an opaque "ffmpeg exited with code N" with no
+    context."""
+    stderr = getattr(exc, "stderr", "") or ""
     logger.error(
-        "VIDEO_URL_FAILURE stage=%s category=%s exception_type=%s sanitized_error=%s\n%s",
+        "VIDEO_URL_FAILURE stage=%s category=%s exception_type=%s sanitized_error=%s%s\n%s",
         stage,
         category,
         type(exc).__name__,
         _sanitize_log_text(str(exc)),
+        f" ffmpeg_stderr={_sanitize_log_text(stderr)}" if stderr else "",
         _sanitized_traceback(exc),
     )
 
@@ -394,68 +422,105 @@ def fetch_metadata(url: str) -> VideoURLMetadata:
     )
 
 
-def extract_audio_interval(url: str, start_seconds: float, window_seconds: float) -> tuple[AudioSample, bytes, str]:
+def extract_audio_interval(
+    url: str,
+    start_seconds: float,
+    window_seconds: float,
+    *,
+    known_duration_seconds: float | None = None,
+) -> tuple[AudioSample, bytes, str]:
     """Retrieve and normalize ONLY the selected [start, start+window)
-    interval of a public video's audio track -- never the whole source,
-    and never an arbitrary/undisclosed section.
+    interval of a public video's audio track.
 
-    Uses yt-dlp's `download_ranges` + `force_keyframes_at_cuts` with an
-    audio-only format selection so, where the resolved format supports it
-    (typically YouTube's DASH audio streams), only approximately the
-    requested interval is actually transferred rather than the full
-    source -- see docs/input_sources.md for the documented limitation on
-    formats that do not support ranged/partial retrieval.
+    Two-stage architecture (see docs/input_sources.md, "Native download /
+    local interval extraction split" for why):
 
-    Returns the normalized AudioSample, the raw extracted-audio bytes
-    (hashed by the caller as the analyzed content's SHA-256 -- the URL
-    itself is never used as a proxy for content identity), and the
-    extracted audio container's file extension (for display only)."""
+    STAGE A -- NATIVE DOWNLOAD: yt-dlp's own native downloader retrieves
+    the full audio-only stream to a local temporary file. `download_ranges`
+    / `force_keyframes_at_cuts` are deliberately NOT used here -- those
+    options make yt-dlp invoke ffmpeg directly against the remote SIGNED
+    media URL as an external downloader for the ranged retrieval, which
+    worked locally but failed on Streamlit Cloud ("ffmpeg exited with code
+    8"). Audio-only (`bestaudio/best`); the video stream is never
+    downloaded.
+
+    STAGE B -- LOCAL INTERVAL EXTRACTION: once the full audio track is a
+    LOCAL file, `app.analysis.media_ffmpeg.extract_video_audio_window` (the
+    same shared, unmodified local-file interval-extraction/normalization
+    utility the Video File source already uses) cuts the selected
+    [start, start+window) interval and normalizes it -- ffmpeg always
+    receives a local filesystem path here, never a remote URL.
+
+    `known_duration_seconds`, when the caller already has it from
+    `fetch_metadata`, is checked before Stage A starts so an unexpectedly
+    long source is rejected before downloading its full audio track.
+
+    Returns the normalized AudioSample, the raw downloaded source-audio
+    bytes (hashed by the caller as the analyzed content's SHA-256 -- the
+    URL itself is never used as a proxy for content identity, consistent
+    with how the Video File source hashes its full source file), and the
+    downloaded audio container's file extension (for display only)."""
     validate_public_video_url(url)
 
+    if known_duration_seconds is not None and known_duration_seconds > MAX_SOURCE_DURATION_SECONDS:
+        raise VideoURLError(
+            "This video is too long to analyze via a public link. Please download the "
+            "portion you need and use the file-analysis option instead.",
+            category=SOURCE_UNAVAILABLE,
+        )
+
     tmp_dir = Path(tempfile.mkdtemp(prefix="adf_url_"))
-    outtmpl = str(tmp_dir / "audio.%(ext)s")
+    outtmpl = str(tmp_dir / "source_audio.%(ext)s")
     end_seconds = start_seconds + window_seconds
     opts = {
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
-        # Robust audio-only selection with a combined-stream fallback -- see
-        # docs/input_sources.md, "Format selection robustness". Never forces
-        # a specific container (m4a/mp3/etc.); ffmpeg normalizes afterward.
+        # Robust audio-only selection with a combined-stream fallback --
+        # see docs/input_sources.md, "Format selection robustness". Never
+        # forces a specific container (m4a/mp3/etc.); ffmpeg normalizes
+        # afterward. Deliberately NO download_ranges/force_keyframes_at_cuts
+        # -- see the docstring above and Stage B below.
         "format": "bestaudio/best",
         "outtmpl": outtmpl,
-        "download_ranges": yt_dlp.utils.download_range_func(None, [(max(0.0, start_seconds), end_seconds)]),
-        "force_keyframes_at_cuts": True,
         "socket_timeout": YTDLP_DOWNLOAD_TIMEOUT_SECONDS,
         "max_filesize": MAX_URL_DOWNLOAD_BYTES,
         "logger": _SilentYDLLogger(),
     }
     _log_pre_extraction_diagnostic(url, start_seconds, end_seconds)
     try:
+        # --- Stage A: native download of the full audio-only stream ---
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 ydl.download([url])
         except Exception as exc:  # noqa: BLE001 -- never leak an extractor traceback to the UI
-            category = classify_extraction_error(exc)
-            _log_extraction_failure("audio_download", exc, category)
+            category = classify_extraction_error(exc, default=NATIVE_DOWNLOAD_FAILED)
+            _log_extraction_failure("native_audio_download", exc, category)
             raise VideoURLError(_safe_message(category), category=category) from exc
 
-        downloaded = sorted(tmp_dir.glob("audio.*"))
+        downloaded = sorted(tmp_dir.glob("source_audio.*"))
         if not downloaded:
             raise VideoURLError(_safe_message(NO_AUDIO_STREAM), category=NO_AUDIO_STREAM)
 
-        raw_bytes = downloaded[0].read_bytes()
+        source_path = downloaded[0]
+        raw_bytes = source_path.read_bytes()
         if not raw_bytes:
             raise VideoURLError(_safe_message(NO_AUDIO_STREAM), category=NO_AUDIO_STREAM)
 
-        source_extension = downloaded[0].suffix
+        source_extension = source_path.suffix
 
+        # --- Stage B: local interval extraction + normalization ---
+        # extract_video_audio_window writes `raw_bytes` back out to its OWN
+        # local temp file internally and runs ffmpeg against that local
+        # path -- ffmpeg never sees a remote URL in this function.
         try:
-            audio_sample = decode_bytes_to_audio_sample(raw_bytes, "online_video_audio", source_extension)
+            audio_sample, _probed = extract_video_audio_window(
+                raw_bytes, "online_video_audio", source_extension, start_seconds, window_seconds
+            )
         except MediaDecodeError as exc:
-            _log_extraction_failure("ffmpeg_decode", exc, FFMPEG_FAILED)
+            _log_extraction_failure("local_interval_extract", exc, FFMPEG_LOCAL_PROCESSING_FAILED)
             raise VideoURLError(
-                "The retrieved audio could not be decoded.", category=FFMPEG_FAILED
+                _safe_message(FFMPEG_LOCAL_PROCESSING_FAILED), category=FFMPEG_LOCAL_PROCESSING_FAILED
             ) from exc
 
         if audio_sample.duration_seconds <= 0:
