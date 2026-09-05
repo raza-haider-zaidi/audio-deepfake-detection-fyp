@@ -80,6 +80,230 @@ models:
       Phase 2 preliminary recommendation (fully reproducible loading path,
       verified label semantics). See docs/streamlit_mvp.md.
 
+  antideepfake_wav2vec2_small:
+    id: antideepfake_wav2vec2_small
+    repository: nii-yamagishilab/wav2vec-small-anti-deepfake
+    revision: 9a13264b5dcc827a8d5a4f8e01fccefa392f886b
+    enabled: false
+    architecture: "Custom DeepfakeDetector (fairseq Wav2Vec2Model SSL frontend, wav2vec2-base config) + AdaptiveAvgPool1d + Linear(768->2) head. NOT a standard transformers Wav2Vec2ForSequenceClassification -- confirmed from the model's own published inference script."
+    base_model: facebook/wav2vec2-base
+    sample_rate: 16000
+    window_seconds: null
+    checkpoint_filename: model.safetensors
+    checkpoint_size_bytes: 380210632
+    label_mapping:
+      0: bonafide
+      1: spoof
+    license: CC-BY-NC-SA-4.0
+    training_dataset: "~56,000h genuine + ~18,000h fake/artifact speech, 100+ languages, post-trained on ASVspoof2019-LA/2021-LA/2021-DF/5, CFAD, DECRO, DFADD, MLAAD, SpoofCeleb, WaveFake, LibriTTS(-Vocoded/-R), VoxCeleb2(-Vocoded), FLEURS(-R), CodecFake/Codecfake, AISHELL3, CNCeleb2, MLS, and others (arXiv:2506.21090 Table I). RawBoost data augmentation applied."
+    source_repository: https://github.com/nii-yamagishilab/AntiDeepfake
+    source_repository_status: "VERIFIED (HTTP 200) -- official inference script (model card README.md) inspected directly; uses fairseq.models.wav2vec.Wav2Vec2Model as the SSL frontend, not transformers."
+    deployment_role: research_candidate_blocked_dependency
+    notes: >
+      PHASE 5 (generalization-focused replacement evaluation). Author-reported
+      EER (held-out, non-training datasets per the paper's own Table, quoted
+      as AUTHOR-REPORTED, not project-measured): ADD2023 4.67%, DEEP-VOICE
+      2.27%, FakeOrReal 0.46-0.63%, In-the-Wild 1.23%, Deepfake-Eval-2024
+      8.29-27.77%. Label mapping (index 0 = fake/spoof, index 1 = real/
+      bonafide) confirmed directly from the official inference script's
+      softmax indexing (`prob[1]` printed as "real prob", `prob[0]` as
+      "fake prob"), not assumed.
+      BLOCKED: the official/only documented inference path requires
+      `fairseq` (fairseq.models.wav2vec.Wav2Vec2Model), which does not
+      install in this project's CPU/Windows/Python 3.12 .venv. Verified by
+      two real, reproducible pip failures on 2026-08-26: (1) `pip install
+      fairseq` fails at the sdist build-requirements stage with
+      `FileNotFoundError: fairseq\\version.txt` (a broken 0.12.1 sdist on
+      PyPI, upstream packaging bug, unrelated to this project); (2) `pip
+      install git+https://github.com/facebookresearch/fairseq.git` also
+      fails to build. No verified ONNX or transformers-native re-export of
+      this checkpoint exists. Per project policy (docs/development_policy.md: never invent
+      an architecture merely to make a checkpoint load), a hand-rolled
+      fairseq-to-transformers key-mapping reimplementation was NOT
+      attempted, because there is no working fairseq install in this
+      environment to verify numerical parity against -- an unverifiable
+      reimplementation risks silently wrong outputs, which is worse than
+      not integrating the model at all.
+      The adapter class below (CandidateAntiDeepfakeWav2Vec2Detector)
+      reproduces the official inference script's classes and forward pass
+      faithfully and imports fairseq lazily inside load(), so importing
+      this module does not fail -- but load() will raise ImportError in
+      this environment. It is disabled (enabled: false) and excluded from
+      the default test suite; only present so this work is not lost if the
+      dependency becomes installable (e.g. a future fairseq release, or a
+      Linux build environment) or a verified transformers-native port
+      appears. See docs/replacement_model_evaluation.md for full analysis.
+
+  antideepfake_wav2vec2_onnx:
+    id: antideepfake_wav2vec2_onnx
+    repository: SpeechAntiSpoofingBenchmarks/Wav2Vec2-Small-AntiDeepfake
+    revision: 85f8e14878533ed0c96c9bef119580ab4b5ef31f
+    enabled: false
+    architecture: "ONNX export (opset 17) of the same wav2vec 2.0 Base + AdaptiveAvgPool1d + Linear(768,2) checkpoint as antideepfake_wav2vec2_small, exported by a third-party community benchmark maintainer (Speech Anti-Spoofing Arena), not the original NII authors. Graph input 'wav' float32 [batch,64000], output 'logits' float32 [batch,2] -- read directly from the ONNX graph via onnxruntime, not guessed. 64000 samples @ 16kHz = 4.0s, identical window size to sara_wav2vec2."
+    base_model: nii-yamagishilab/wav2vec-small-anti-deepfake
+    sample_rate: 16000
+    window_seconds: 4.0
+    window_samples: 64000
+    checkpoint_filename: wav2vec2-small-antideepfake.onnx
+    checkpoint_size_bytes: 377935876
+    label_mapping:
+      0: spoof
+      1: bonafide
+    license: CC-BY-NC-SA-4.0
+    training_dataset: "Same checkpoint as antideepfake_wav2vec2_small (see that entry); this is a bit-exact copy per the mirror's own README and the identical model.safetensors byte size (380210632)."
+    source_repository: https://github.com/nii-yamagishilab/AntiDeepfake
+    source_repository_status: "VERIFIED (HTTP 200 via direct API/curl, not WebFetch summarization) -- HF repo SpeechAntiSpoofingBenchmarks/Wav2Vec2-Small-AntiDeepfake confirmed real: API metadata, README.md, config.json, and the ONNX/TensorRT export script (trt_wav2vec2_small_antideepfake.py, commit 51b0d36ae02dfae10b96856b2ea410e725a56042) all fetched and inspected directly. ONNX file SHA256 36ecc56f1f4b1a230e657b14c2d67702b7b01a0d6cb66ac4601497f12c3803d3 (verified: matches HF API paths-info AND the locally downloaded file)."
+    deployment_role: research_candidate_blocked_preprocessing
+    notes: >
+      PHASE 5 continuation ("ONNX Rescue Investigation", triggered by a user
+      correction pointing at this mirror after antideepfake_wav2vec2_small
+      was found fairseq-blocked). Unlike that model, the ONNX graph LOADS
+      and RUNS on CPU here (onnxruntime 1.29.0, CPUExecutionProvider only,
+      verified 2026-08-27) -- see results/metrics/antideepfake_onnx_status.json
+      for the full CPU benchmark (cold load time, RSS, per-window latency at
+      intra_op_num_threads=1 and 2, smoke-input determinism check).
+      BLOCKED at a different step: the ONNX graph only contains the neural
+      network; the crop/pad-to-64000-samples preprocessing that the mirror's
+      own export script says "already lives in the original score_batch()"
+      is not published anywhere. The export script
+      (trt_wav2vec2_small_antideepfake.py) imports that function from an
+      external `wav2vec2_small_antideepfake` module that is not a file in
+      this HF repo, and the Arena's own application source (HF Space
+      SpeechAntiSpoofingBenchmarks/SpeechAntiSpoofingArena, file listing
+      fetched directly via the HF API) contains only the leaderboard web
+      app -- no scoring/preprocessing framework code. No GitHub repository
+      for this framework could be found by search. Per the project owner's
+      explicit instruction ("do not proceed to scientific evaluation using
+      guessed preprocessing") and docs/development_policy.md's no-fabrication policy, this
+      adapter's predict() deliberately raises RuntimeError rather than
+      guessing the crop/pad/windowing strategy and producing a plausible-
+      looking but unverifiable detection result. Consequently no accuracy,
+      EER, ROC-AUC, threshold, robustness, or Sara accuracy-comparison
+      numbers exist for this model -- only CPU resource-benchmark numbers,
+      which do not require correct preprocessing. Label mapping (0=spoof,
+      1=bonafide) is ASSUMED consistent with the original checkpoint's
+      verified mapping, not independently re-verified against this ONNX
+      export's own outputs (doing so would require the same blocked
+      preprocessing). See docs/replacement_model_evaluation.md, "ONNX
+      Rescue Investigation" section, for the full evidence trail.
+
+  spectra_aasist3_onnx:
+    id: spectra_aasist3_onnx
+    repository: lab260/Spectra-AASIST3
+    revision: bc0ded888080ddad493177bb53aa6f5b95219d7c
+    enabled: false
+    architecture: "wav2vec 2.0 XLS-R-300m front-end (standard transformers Wav2Vec2Model, not fairseq) + single-layer MLP bridge (Linear 1024->128) + KAN-enhanced AASIST back-end (RawNet2-style residual encoder, spectral/temporal graph-attention branches, Kolmogorov-Arnold output layer). Verified directly from the model's own vendored, self-contained model.py -- no external framework dependency. ONNX graph input 'wav' float32 [batch,64600], output 'logits' float32 [batch,2], read directly via onnxruntime."
+    base_model: facebook/wav2vec2-xls-r-300m
+    sample_rate: 16000
+    window_seconds: 4.0375
+    window_samples: 64600
+    checkpoint_filename: spectra-aasist3.onnx
+    checkpoint_size_bytes: 1279022864
+    expected_sha256: 5f05c29a01ad80c702b32654db87c2aa6e467c11c67b6d47f2fac873f846cae9
+    label_mapping:
+      0: spoof
+      1: bonafide
+    license: Apache-2.0
+    training_dataset: "Not documented on the model card beyond the Arena's per-dataset evaluation table (ASVspoof2019_LA listed as an 'in-domain family' eval, implying it or a closely related set was used in training/post-training -- not confirmed either way from the card). No training-data table equivalent to antideepfake_wav2vec2_small's arXiv Table I was found for this pre-release model."
+    source_repository: null
+    source_repository_status: "PRE-RELEASE / UNPUBLISHED model -- no associated paper or public GitHub repository found. Appears in the Speech Anti-Spoofing Arena's Unpublished/Proprietary tier (listed, unranked). Same maintainer (Kirill Borodin, SpeechAntiSpoofingBenchmarks-affiliated) as antideepfake_wav2vec2_onnx and the earlier AntiDeepfake ONNX mirror -- verified directly via HF API/curl, not WebFetch summarization."
+    deployment_role: research_candidate_resource_and_academic_caveats
+    notes: >
+      PHASE 5 continuation. Unlike antideepfake_wav2vec2_onnx (candidate_d),
+      this model's crop/pad preprocessing IS documented in prose on its own
+      model card README (preemphasis coefficient 0.97 applied to the full
+      waveform, then a deterministic first-64,600-sample window with
+      tile-repeat padding for shorter clips) even though the runnable
+      wrapper file the README itself links to (spectra_aasist3.py,
+      spectra_aasist3_net.py) does not exist in this repository (both
+      confirmed HTTP 404) -- only the vendored network (model.py) is
+      present. This adapter (candidate_e.py,
+      CandidateSpectraAasist3OnnxDetector) therefore implements predict(),
+      unlike candidate_d.py. One convention (pre-emphasis first-sample
+      edge handling) is not explicitly spelled out in the README and is
+      implemented per the universal DSP default (y[0]=x[0]), documented as
+      an assumption, not a guess about the whole preprocessing pipeline.
+      Score direction (index 1 = bona-fide logit, higher = more bona
+      fide) is verified directly from model.py's own classify() method
+      (thresholds index 1 against a baked-in default of -1.0625009), not
+      just README prose.
+      RESOURCE GATE (measured 2026-08-27, this project's dev machine, CPU
+      onnxruntime 1.29.0): checkpoint 1,279,022,864 bytes (~1.28GB, ~3.4x
+      Sara's checkpoint); cold load ~12.5s (~7x slower than Sara's 1.79s);
+      peak process RSS ~1.66GB (vs Sara's measured ~1.2GB full-app
+      figure); per-window (4.04s) CPU inference ~1.04s at
+      intra_op_num_threads=2 (~7.4x slower than Sara's 140ms for the same
+      window length). This does not trigger the project's hard 2.5GB
+      resource-gate stop, but is a serious, independently-measured
+      Streamlit deployment concern regardless of downstream accuracy
+      results -- see results/metrics/spectra_aasist3_resource_gate.json
+      and docs/spectra_aasist3_evaluation.md for the full breakdown and
+      final decision.
+      This is a PRE-RELEASE/UNPUBLISHED model (no peer-reviewed paper);
+      author/Arena-reported EER numbers (e.g. InTheWild 1.20%) are
+      maintainer-reported only and are never presented as this project's
+      own measured results anywhere in this codebase.
+      PRODUCTION-OPTIMIZATION UPDATE (feat/spectra-production-optimization):
+      dynamic INT8 quantization (onnxruntime.quantization.quantize_dynamic,
+      MatMul-only) was evaluated against this FP32 baseline. Result: 71.5%
+      smaller (1.28GB -> 364MB), ~1.9x faster cold load, ~2.15x less
+      resident memory, ~1.6x faster per-window inference, with NO
+      measurable accuracy degradation on the same 200-clip evaluation set
+      (bonafide FPR 3.0%->2.0%, F1 0.933->0.938, ROC-AUC 0.977->0.982, EER
+      2.0%->3.0% -- within small-sample noise, all Step-10 acceptance
+      criteria met). See spectra_aasist3_onnx_int8 below and
+      docs/spectra_production_optimization.md for the full analysis. The
+      FP32 threshold above (0.9299831390380859) remains this entry's
+      default; use INT8_DYNAMIC_CALIBRATED_THRESHOLD
+      (0.939693808555603, candidate_e.py) when scoring with the INT8
+      artifact instead.
+
+  spectra_aasist3_onnx_int8:
+    id: spectra_aasist3_onnx_int8
+    repository: Limitless-8/spectra-aasist3-int8-audio-deepfake  # published 2026-08-31, public model repo, derived INT8 artifact with attribution to lab260/Spectra-AASIST3
+    revision: b56aed04853cb4e5bf825025c54c93d4bc345c61  # exact HF commit containing the uploaded spectra-aasist3-int8-dynamic.onnx, verified via HfApi.model_info(files_metadata=True)
+    enabled: true
+    architecture: "Dynamic INT8 weight-quantized (onnxruntime.quantization.quantize_dynamic, MatMul-only, QInt8, per_channel=False) export of spectra_aasist3_onnx's FP32 ONNX graph. Same wav2vec2 XLS-R-300m + MLP bridge + KAN-AASIST architecture; 351 of 417 MatMul nodes converted to MatMulInteger, 66 MatMul + all 24 Conv nodes remain fp32."
+    base_model: facebook/wav2vec2-xls-r-300m
+    sample_rate: 16000
+    window_seconds: 4.0375
+    window_samples: 64600
+    checkpoint_filename: spectra-aasist3-int8-dynamic.onnx
+    checkpoint_size_bytes: 364036647
+    expected_sha256: 444f832d306a2be4f823119f84e698e8821db6a1aab248593d4b05b7a9a48108
+    label_mapping:
+      0: spoof
+      1: bonafide
+    license: Apache-2.0
+    training_dataset: "Identical underlying weights to spectra_aasist3_onnx (see that entry) -- quantization is a post-hoc numerical transform of the same trained checkpoint, not a retraining."
+    source_repository: https://huggingface.co/Limitless-8/spectra-aasist3-int8-audio-deepfake
+    source_repository_status: "DERIVED ARTIFACT, PUBLISHED. Generated locally by this project (scripts/run_spectra_int8_evaluation.py pipeline; quantize_dynamic call) from the verified lab260/Spectra-AASIST3 FP32 checkpoint, then published publicly to Limitless-8/spectra-aasist3-int8-audio-deepfake on Hugging Face (commit b56aed04853cb4e5bf825025c54c93d4bc345c61), with a model card crediting the original authors (lab260/Spectra-AASIST3, Apache-2.0) and the upstream facebook/wav2vec2-xls-r-300m backbone. NOT committed to this git repository (>300MB, gitignored under models/cache/*) -- downloaded from the public HF repo at runtime via huggingface_hub, with SHA256 verified before the ONNX session is constructed."
+    deployment_role: cpu_streamlit_candidate_int8
+    notes: >
+      PRODUCTION OPTIMIZATION sub-phase. SHA256 of the locally-generated
+      artifact: 444f832d306a2be4f823119f84e698e8821db6a1aab248593d4b05b7a9a48108.
+      Numerical parity vs FP32 (100-clip calibration-only subset, 50
+      bonafide + 50 spoof): mean absolute bona-fide-logit difference
+      0.149, median 0.078, max 1.17, Pearson r=0.999, Spearman
+      rho=0.998, 100% decision agreement at the FP32 threshold -- see
+      results/metrics/spectra_int8_parity.json. INT8-calibrated threshold
+      (derived from the SAME 200-clip calibration set used for FP32, EER
+      method): 0.939693808555603 -- see
+      results/metrics/spectra_int8_calibration.json. Frozen evaluation on
+      the SAME 200-clip evaluation set as FP32: accuracy 94.0%, bonafide
+      FPR 2.0%, spoof FNR 10.0%, F1 0.9375, ROC-AUC 0.9819, EER 3.0% -- all
+      Step-10 acceptance criteria met (see
+      results/metrics/spectra_int8_acceptance_criteria.json). Complete
+      Streamlit-stack process RSS after a real 30-second analysis:
+      ~821MB (vs FP32's ~1722MB and Sara's own ~900-1200MB baseline) --
+      see results/metrics/spectra_streamlit_process_simulation_int8.json.
+      This is the strongest evidence produced anywhere in this project
+      for a CPU-Streamlit-feasible generalization-focused detector.
+      NOT enabled pending an explicit production-artifact-distribution
+      decision (Step 17) -- committing the >300MB binary to git is
+      prohibited by project policy, and publishing a derived model to
+      Hugging Face requires explicit user instruction not yet given.
+
   hf_reference:
     id: hf_reference
     repository: mo-thecreator/Deepfake-audio-detection

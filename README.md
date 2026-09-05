@@ -2,109 +2,112 @@
 
 **Detecting AI-Generated and Cloned Voices: A Deep Learning System for Robust Audio Deepfake Detection**
 
-Final-year Computer Science project.
+Final-year Computer Science project. Author: **Syed Raza Haider Zaidi**.
+
+Repository: [`raza-haider-zaidi/audio-deepfake-detection-fyp`](https://github.com/raza-haider-zaidi/audio-deepfake-detection-fyp)
 
 ## Purpose
 
-This project builds a system for detecting AI-generated and voice-cloned audio
-(audio deepfakes). It aims to evaluate how well deepfake detection approaches
-generalise across datasets and generation methods, and how robust they are to
-real-world signal degradation (compression, noise, re-recording).
+This project builds a system for detecting AI-generated and voice-cloned
+audio (audio deepfakes). It evaluates how well a pretrained deepfake
+detection approach generalises across datasets and generation methods, how
+robust it is to real-world signal degradation (compression, noise,
+re-recording), and packages it as an interactive, browser-based analysis
+tool.
 
-## Current Status: Phase 3 — CPU Streamlit MVP
+## Features
 
-Completed:
-- **Phase 1:** Project-local Python 3.12 `.venv`, FFmpeg, Git repository, and
-  baseline repository structure.
-- **Phase 2:** CPU-only pretrained Wav2Vec2 anti-spoofing model candidates
-  researched, verified against their documented sources, integrated behind
-  a model-independent adapter interface, and benchmarked for CPU inference
-  latency and memory usage. See
-  [`docs/model_candidate_analysis.md`](docs/model_candidate_analysis.md) and
-  [`docs/cpu_model_benchmark.md`](docs/cpu_model_benchmark.md).
-- **Phase 3 (this phase):** A polished, CPU-only Streamlit web application
-  (`streamlit_app.py`) built around the Phase 2 inference backend, using
-  `sara_wav2vec2` (`Sara1708/deepfake-audio-wav2vec2`, pinned revision
-  `6c43629c953d6ff008501bf5f3eb983ac2321ad6`) as the deployment model. See
-  [`docs/streamlit_mvp.md`](docs/streamlit_mvp.md) and
-  [`docs/deployment.md`](docs/deployment.md).
+- Binary bonafide/spoof classification with a calibrated decision threshold,
+  per-segment evidence, and a plain-language result summary.
+- Five input sources feeding the **same** frozen detection pipeline: Audio
+  File, Microphone, Voice Note, Video (audio track only), and Video URL
+  (public YouTube links, via the Local URL Helper — see below).
+- Segment-level evidence table, audio-quality diagnostics, waveform/mel-
+  spectrogram visualizations, and an optional robustness analysis
+  (compression/noise/resampling degradations applied on demand).
+- Downloadable PDF/HTML/JSON analysis reports.
+- CPU-only inference — no GPU, no CUDA dependency, no dedicated inference
+  server.
 
-Not yet started:
-- Deploying to GitHub / Streamlit Community Cloud
-- Dataset acquisition and real accuracy evaluation (Phase 4)
-- Any model training or fine-tuning (out of scope for this project's MVP)
+## Model
 
-**Important:** No dataset has been used to evaluate real-world detection
-accuracy at any phase so far. Any EER/accuracy figures referenced in this
-project's documentation are author-reported model-card claims from the
-model publishers, not results produced by this project.
+- **Architecture:** `spectra_aasist3_onnx_int8` — a dynamic INT8
+  weight-quantized (ONNX Runtime `quantize_dynamic`, MatMul-only) export of
+  an XLS-R-300M (`facebook/wav2vec2-xls-r-300m`) + KAN-enhanced AASIST
+  back-end anti-spoofing model, quantized from a verified upstream FP32
+  checkpoint (`lab260/Spectra-AASIST3`, Apache-2.0) with no retraining.
+- **Runtime:** ONNX Runtime, CPU execution provider only.
+- **Input:** 16 kHz mono audio, analyzed in a native ~4.04 s window
+  (64,600 samples) per segment; up to 30 seconds of audio is analyzed per
+  request across all input sources.
+- **Decision threshold:** calibrated on a held-out split
+  (`INT8_DYNAMIC_CALIBRATED_THRESHOLD = 0.939693808555603`); see
+  `src/audio_deepfake_detector/models/candidate_e.py`.
+- **License:** Apache-2.0 (see `configs/models.yaml` for the exact upstream
+  and derived-artifact provenance, revision, and SHA-256).
+- The upstream model is **pre-release/unpublished** — no peer-reviewed
+  paper exists for it. Any EER/accuracy figures quoted from the model
+  publisher are clearly labeled as author-reported, never presented as
+  this project's own measured result. This project's own measured
+  evaluation is in
+  [`docs/spectra_aasist3_evaluation.md`](docs/spectra_aasist3_evaluation.md).
 
-## Deployment Target: CPU-Only, Browser-Based
+## Deployment architecture
 
-The final application is a **Streamlit app running entirely on CPU**,
-accessible from an ordinary browser on almost any device. It is explicitly
-**not** designed around the development machine's NVIDIA GPU:
+The application is a **Streamlit app running entirely on CPU**:
 
-- No CUDA / NVIDIA GPU dependency anywhere in the production path
-- No dedicated inference server, no other machine needing to be online, no
-  database, no user accounts
-- `torch`/`torchaudio` are installed from the official **CPU wheel index**
-  (`https://download.pytorch.org/whl/cpu`), both locally and in
-  `requirements.txt` for Streamlit Community Cloud
-- All model adapters and the inference service accept `device="cpu"` or
-  `device="auto"`, and `"auto"` always safely resolves to CPU
-- The end user's device needs only a browser — no Python, PyTorch, CUDA, or
-  local backend server
+- No CUDA/GPU dependency in the deployed path; `torch`/`torchaudio` (used
+  only by research-only candidate adapters, not the deployed model) are
+  installed from the official CPU wheel index when needed.
+- No database, no user accounts, no persistent server-side storage of
+  submitted media.
+- Model weights are downloaded from Hugging Face at runtime (via
+  `huggingface_hub`), verified by SHA-256 before use, and cached
+  (`st.cache_resource`) — not committed to this repository.
 
-## Implementation Strategy
+### Local URL Ingestion Helper
 
-The project follows an **MVP-first approach**:
+Streamlit Community Cloud's datacenter network is not reliably accepted by
+YouTube's media servers, even with a Proof-of-Origin token provider (see
+[`docs/input_sources.md`](docs/input_sources.md)). Video URL analysis is
+therefore served by a small, separately-run **local helper**
+(`local_helper/`) on a machine where retrieval works normally, reached over
+a temporary, authenticated Cloudflare Quick Tunnel. Full architecture,
+privacy implications, and usage in
+[`docs/local_url_helper.md`](docs/local_url_helper.md).
 
-1. **Phase 1:** Environment and repository setup.
-2. **Phase 2:** Select and CPU-benchmark a pretrained Wav2Vec2 audio
-   deepfake detector (no training from scratch). See
-   [`docs/model_candidate_analysis.md`](docs/model_candidate_analysis.md).
-3. **Phase 3 (this phase):** Build a polished **Streamlit** app around the
-   chosen deployment candidate for interactive, browser-based
-   demonstration. See [`docs/streamlit_mvp.md`](docs/streamlit_mvp.md).
-4. **Phase 4 (research extension):** Acquire an evaluation dataset, compare
-   multiple detection approaches, evaluate **cross-dataset generalisation**,
-   and test **robustness** under audio degradations (compression codecs,
-   additive noise, resampling, re-recording/replay conditions).
+**To use Video URL analysis:**
+1. Run `Raza Audio URL Helper.exe` (built via
+   `scripts/build_local_helper.ps1`) on a machine with working internet
+   access to YouTube.
+2. Click **Copy Connection** once it shows **Ready**.
+3. In the deployed app's Video URL source, paste the connection code and
+   click **Connect**.
+4. Use **Load Video** → select an interval → **Prepare Selected Audio** as
+   normal.
 
-Training a model from scratch is explicitly out of scope; the system relies
-on existing pretrained detectors.
+Every other input source (Audio File, Microphone, Voice Note, Video) works
+without the helper.
 
-## Setup Instructions
+## Installation / local use
 
 ### Prerequisites
-- Windows with Python 3.12 available (installed via winget if not already present)
+- Windows with Python 3.12
 - Git
-- FFmpeg (installed via winget)
-- No GPU required. (The development machine has an NVIDIA RTX 5060 Ti, but
-  it is intentionally not used or optimized for — everything here runs and
-  is benchmarked on CPU.)
+- FFmpeg on `PATH`
+- No GPU required — everything here runs and is benchmarked on CPU.
 
-### Create and activate the virtual environment
+### Set up the environment
 
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-Always use the project-local `.venv` — do not use a global or unrelated
-project's Python environment.
-
-### Install dependencies
-
-```powershell
-# CPU-only PyTorch/torchaudio — install from the official CPU wheel index,
-# NOT plain PyPI (which may resolve a CUDA build):
-.\.venv\Scripts\python.exe -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
-
-# Remaining project dependencies (includes Streamlit + matplotlib):
-.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
-```
+For local development of the research adapters (not needed to run the
+deployed app), install the full package instead:
+`.\.venv\Scripts\python.exe -m pip install -e ".[dev]"`.
 
 ### Run the Streamlit app locally
 
@@ -112,10 +115,9 @@ project's Python environment.
 .\.venv\Scripts\python.exe -m streamlit run streamlit_app.py
 ```
 
-The page renders immediately without loading the ~468 MiB detection model —
-the model is downloaded/loaded lazily the first time you click
-**Analyze Audio**, and is cached (`st.cache_resource`) for the rest of the
-running session.
+The page renders immediately; the detection model is downloaded/loaded
+lazily the first time you click **Analyze Audio**, and cached for the rest
+of the session.
 
 ### Run tests
 
@@ -127,65 +129,84 @@ running session.
 .\.venv\Scripts\python.exe -m pytest -v -m "integration"
 ```
 
-### Generate smoke-test audio and run a CLI prediction
+### Build the Local URL Helper
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\generate_smoke_audio.py
-.\.venv\Scripts\python.exe scripts\predict_audio.py data\samples\smoke_multitone_4s.wav --model sara_wav2vec2
+.\scripts\build_local_helper.ps1
 ```
 
-Smoke audio is synthetic (sine/multi-tone waveforms) and used only to
-validate the decode -> resample -> inference pipeline. Its predicted labels
-have no scientific or detection-quality meaning.
+Produces `dist\Raza Audio URL Helper\Raza Audio URL Helper.exe` — see
+[`docs/local_url_helper.md`](docs/local_url_helper.md).
 
-### Run the CPU benchmark harnesses
-
-```powershell
-# Model-only CPU benchmark (Phase 2):
-.\.venv\Scripts\python.exe scripts\benchmark_models.py
-
-# Full-process resource diagnostic for the Streamlit app path (Phase 3, dev-only):
-.\.venv\Scripts\python.exe scripts\benchmark_streamlit_resources.py
-```
-
-## Repository Structure
+## Repository structure
 
 ```
 streamlit_app.py                    Streamlit entrypoint (Community Cloud runs this directly)
-requirements.txt                    Root-level pinned dependencies for Streamlit Community Cloud
+requirements.txt                    Root-level pinned dependencies for the deployed Streamlit app
+requirements-helper.txt             Separate, smaller dependency set for local_helper/ only
 packages.txt                        Debian apt packages for Streamlit Community Cloud (ffmpeg)
 .streamlit/config.toml              Streamlit server/theme configuration (no secrets)
 app/                                 Streamlit presentation-layer helpers (no model logic)
-    errors.py                       UserFacingError — friendly message + technical detail
-    validation.py                   Upload constraints on top of shared preprocessing
-    formatting.py                   Pure label/probability/window-table formatting
-    visualizations.py               Waveform + mel-spectrogram matplotlib figures
-    model_loader.py                 The only st.cache_resource-decorated model loader
+    analysis/                       Input adapters (audio file/mic/voice note/video/video URL), reporting inputs
+    reporting/                      PDF/HTML/JSON report generation
+    views/                          One render() function per page (app/nav.py registers them)
+local_helper/                       Local URL Ingestion Helper (separate app, own dependency set)
 src/audio_deepfake_detector/
     config/                         configs/models.yaml loader
     preprocessing/                  Audio loading (audio_loader.py), fixed-window framing (windowing.py)
     inference/                      Device-agnostic inference service
     models/                         BaseDeepfakeDetector interface, registry/factory, per-candidate adapters
-    evaluation/                     Reserved for Phase 4 cross-dataset/robustness metrics
+    evaluation/                     Cross-dataset/robustness evaluation harnesses
     utils/                          Typed data structures (datatypes.py), device resolution (device.py)
 tests/                              Unit tests (default suite) + integration/slow-marked real-model tests
-scripts/                            generate_smoke_audio.py, benchmark_models.py, predict_audio.py,
-                                     benchmark_streamlit_resources.py
+scripts/                            Benchmark/evaluation harnesses, build_local_helper.ps1
 configs/                            models.yaml — single source of truth for model repos/revisions/labels
-data/
-    raw/                            Raw downloaded datasets (gitignored)
-    processed/                      Processed/derived data (gitignored)
-    samples/                        Generated smoke-test audio (gitignored)
-models/
-    checkpoints/                    Downloaded model weights (gitignored)
-    cache/                          Hugging Face cache (gitignored)
-results/
-    metrics/                        cpu_model_benchmark.json and other measured metrics (gitignored)
-    figures/                        Generated plots (gitignored)
-    predictions/                    Model prediction outputs (gitignored)
-    model_manifest.json             Metadata (no weights) for successfully tested models — committed
-docs/                                Design, planning, and model-candidate documentation
+third_party/                        Vendored PO-token provider source (pinned release, own LICENSE)
+docs/                                Architecture, evaluation, and methodology documentation
 ```
+
+## Evaluation summary
+
+This project's own measured evaluation (not the model publisher's
+author-reported figures) is documented in
+[`docs/spectra_aasist3_evaluation.md`](docs/spectra_aasist3_evaluation.md)
+(generalization) and
+[`docs/spectra_production_optimization.md`](docs/spectra_production_optimization.md)
+(INT8 quantization: 71.5% smaller artifact, ~1.9x faster cold load, no
+measurable accuracy degradation vs. the FP32 baseline on the same
+evaluation set). Every reported figure states its exact dataset, split
+size, and model revision — no figure is presented without that context.
+
+## Limitations
+
+Detection performance can be affected by: synthesis methods not
+represented in the evaluation data, audio compression and re-encoding,
+background noise, very short clips, limited or non-speech audio content,
+multiple overlapping speakers, language or domain shift relative to the
+evaluation dataset, recording equipment characteristics, deliberate
+adversarial manipulation, and general distribution shift between the
+evaluation set and real-world audio. The upstream model is pre-release and
+has no peer-reviewed publication. Video URL analysis additionally depends
+on a connected Local URL Helper and is best-effort against a third-party
+platform's own delivery behavior.
+
+## Responsible use
+
+This system is a **research prototype**. Its output should not be used as
+the sole basis for legal decisions, forensic conclusions, disciplinary
+actions, identity verification, or security decisions.
+
+## Privacy
+
+No account or sign-in is required. Uploaded/recorded media is processed
+in memory by the hosted application's server-side process to produce the
+current analysis and is not intentionally retained afterward. For Video
+URL analysis, the public video is retrieved by the user's own connected
+Local URL Helper, and only the selected audio interval is transferred to
+the hosted application — never the full video, never account credentials
+or cookies. Full details in
+[`docs/local_url_helper.md`](docs/local_url_helper.md) and the in-app
+**About** page.
 
 ## Documentation
 
@@ -195,4 +216,28 @@ docs/                                Design, planning, and model-candidate docum
 - [`docs/cpu_model_benchmark.md`](docs/cpu_model_benchmark.md) — measured CPU engineering benchmarks
 - [`docs/streamlit_mvp.md`](docs/streamlit_mvp.md) — Streamlit MVP architecture and behavior
 - [`docs/deployment.md`](docs/deployment.md) — Streamlit Community Cloud deployment notes
-- [`CLAUDE.md`](CLAUDE.md) — development rules for AI-assisted work in this repo
+- [`docs/spectra_aasist3_evaluation.md`](docs/spectra_aasist3_evaluation.md) — Spectra-AASIST3 generalization evaluation vs. the deployed model
+- [`docs/spectra_production_optimization.md`](docs/spectra_production_optimization.md) — INT8 quantization of Spectra-AASIST3 for CPU deployment
+- [`docs/spectra_streamlit_candidate.md`](docs/spectra_streamlit_candidate.md) — this deployment candidate's architecture and history
+- [`docs/input_sources.md`](docs/input_sources.md) — the five input sources, normalization pipeline, and Proof-of-Origin token support
+- [`docs/local_url_helper.md`](docs/local_url_helper.md) — Local URL Ingestion Helper architecture
+- [`docs/development_policy.md`](docs/development_policy.md) — engineering conventions (environment, data/model provenance, code organization)
+
+## License and third-party attribution
+
+This project's own code does not yet have a declared license — no
+`LICENSE` file exists at the repository root, and no license is declared
+in `pyproject.toml`. All rights are reserved by the author pending an
+explicit license decision. Third-party components retain their own
+licenses and are not relicensed by inclusion here:
+
+- Model weights: Apache-2.0 (see `configs/models.yaml` for exact upstream
+  attribution and revision).
+- `third_party/bgutil-ytdlp-pot-provider/` — vendored at a pinned release,
+  GPL-3.0-only, upstream `LICENSE`/`README.md`/attribution preserved
+  unmodified (see `third_party/bgutil-ytdlp-pot-provider/VENDORED.md`).
+- FFmpeg, yt-dlp, Cloudflare `cloudflared`, and every other third-party
+  dependency retain their own upstream licenses; none are redistributed
+  from this repository (installed via `pip`/`packages.txt`, or downloaded
+  by `scripts/build_local_helper.ps1` from the official source at build
+  time).

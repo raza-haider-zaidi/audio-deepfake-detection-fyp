@@ -2,11 +2,14 @@
 # .env.example for local environment variables instead.
 
 [server]
-# Keep the default upload limit reasonable; app-level validation
-# (app/validation.py) enforces a stricter 25 MB / 30-second limit on top
-# of this. 200 MB is Streamlit's own default; we lower it slightly since
-# this app never needs large uploads.
-maxUploadSize = 50
+# Server-level ceiling; app-level validation (app/validation.py) applies
+# stricter, source-specific limits on top of this: 25 MB / 30 s for audio
+# files, voice notes, and microphone captures, and 100 MB for video (video
+# containers are inherently larger; only a user-selected <=30s audio
+# window is ever extracted and analyzed -- see docs/input_sources.md).
+# 100 here is the smallest value that accommodates the video path without
+# raising Streamlit's own 200 MB default further than needed.
+maxUploadSize = 100
 # Community Cloud manages CORS/XSRF itself; leave protections enabled for
 # local runs rather than disabling them for convenience.
 enableXsrfProtection = true

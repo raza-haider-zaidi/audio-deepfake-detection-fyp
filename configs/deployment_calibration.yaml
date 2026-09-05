@@ -1,0 +1,86 @@
+# Phase 4 calibration findings for the sara_wav2vec2 deployment model.
+#
+# STATUS: research output only. NOT wired into app/model_loader.py or
+# streamlit_app.py, and NOT applied to the live deployment. Values below
+# come from scripts/run_calibration.py against the labeled calibration set
+# described in docs/inference_calibration.md (n=320: 100 in-domain
+# bonafide + 100 in-domain spoof from ASVspoof2019 LA dev, 60 out-of-domain
+# genuine from LibriSpeech test-clean, 60 out-of-domain spoof from
+# WaveFake). See docs/inference_calibration.md for the full analysis,
+# limitations, and why this phase's decision gate outcome is "C" (existing
+# model, thresholding alone, is not judged reliable enough for real-world
+# deployment) rather than a recommendation to adopt these values as-is.
+#
+# Regenerate with: .venv\Scripts\python.exe scripts\run_calibration.py
+# (requires: pip install -e ".[calibration]" and
+#  scripts\download_calibration_data.py to have been run first)
+
+deployment:
+  model: sara_wav2vec2
+  status: research_only_not_applied_to_production
+
+  # Measured on the calibration set described above. 0.5 is the threshold
+  # currently used in production (models/candidate_b.py argmax, equivalent
+  # to spoof_score >= 0.5).
+  measured_thresholds:
+    current_production_threshold: 0.5
+    eer_threshold: 0.0125
+    eer: 0.175
+    best_balanced_accuracy_threshold: 0.095
+    best_balanced_accuracy: 0.828
+    fpr_leq_5pct_threshold: 0.74
+    fpr_leq_5pct_combined_fpr: 0.05
+    roc_auc: 0.931
+    note: >
+      No single threshold achieves <=5% FPR on the out-of-domain bonafide
+      subset alone (13.3% FPR even at threshold=0.74, the combined-data
+      FPR<=5% candidate) -- see docs/inference_calibration.md Step 9/21.
+
+  aggregation: mean
+  aggregation_note: >
+    mean, trimmed_mean, and median performed within noise of each other on
+    this calibration set (most clips are 1-3 windows); majority_vote had a
+    measurably lower ROC-AUC (0.849 vs 0.931). No aggregation change is
+    justified by this evidence -- mean (current production behavior) is
+    retained.
+
+  vad_enabled: false
+  vad_min_speech_ratio: null
+  vad_note: >
+    Filtering low-speech-ratio windows did not improve EER or ROC-AUC on
+    this calibration set at any of the tested cutoffs (0%, 25%, 50%, 75%)
+    -- see results/metrics/vad_comparison.json. VAD filtering is NOT
+    recommended for production based on this evidence.
+
+  probability_calibration:
+    method: temperature_scaling
+    temperature: 6.216
+    brier_before: 0.1656
+    brier_after: 0.1188
+    ece_before: 0.1690
+    ece_after: 0.1040
+    applied: false
+    note: >
+      Temperature scaling measurably improves Brier score and ECE on this
+      calibration set, i.e. the raw softmax output is not a well-calibrated
+      probability. Not applied to production in this phase (Step 22:
+      no behavioral changes pushed to main). If adopted later, the UI
+      should still avoid calling the result "certainty" per Step 10.
+
+  uncertainty_enabled_recommended: true
+  uncertainty_zone:
+    reliability_target: 0.95
+    low_threshold: 0.0000001
+    high_threshold: 0.9658
+    coverage_on_calibration_set: 0.656
+    accuracy_on_accepted: 0.952
+    proportion_inconclusive: 0.344
+    note: >
+      This band is derived entirely from calibration data (Step 14), not
+      chosen arbitrarily. However it marks 75-88% of out-of-domain samples
+      inconclusive (see docs/inference_calibration.md), so it mitigates
+      false accusations on ACCEPTED predictions without making the
+      underlying out-of-domain generalization problem go away.
+
+  real_threshold: null
+  spoof_threshold: null

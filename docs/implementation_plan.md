@@ -130,7 +130,7 @@ Cloud, using `sara_wav2vec2` as the deployment model. This phase does
 ## Notes
 
 - Evaluation results must always reflect actual runs — never fabricated or
-  estimated numbers (see [`CLAUDE.md`](../CLAUDE.md)).
+  estimated numbers (see [`docs/development_policy.md`](development_policy.md)).
 - Phase 2 established a working, CPU-only, benchmarked integration path. It
   did **not** establish real-world detection accuracy: there is still no
   evaluation dataset in this project. Any accuracy/EER figures quoted in

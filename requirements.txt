@@ -1,17 +1,21 @@
 # Root-level requirements.txt for Streamlit Community Cloud.
 #
+# EXPERIMENTAL CANDIDATE BRANCH (feat/spectra-streamlit-candidate): this
+# file is intentionally DIFFERENT from main's requirements.txt. The
+# production path on this branch is spectra_aasist3_onnx_int8 (ONNX
+# Runtime CPU only) -- it does NOT need torch/torchaudio/transformers/
+# safetensors, so they are deliberately NOT listed here. Those packages
+# remain real project dependencies for the research adapters
+# (candidate_a/b/c.py -- Sara, CAA, the blocked AntiDeepfake candidate),
+# which are still fully present in src/audio_deepfake_detector/models/ and
+# still installable via `pip install -e ".[dev]"` for local research work;
+# they are simply not imported by this branch's deployed Streamlit path
+# (see docs/spectra_streamlit_candidate.md, "Dependency audit").
+#
 # Community Cloud runs Debian Linux and installs this file directly with
-# pip. The --extra-index-url below points pip at the official CPU-only
-# PyTorch wheel index so it resolves the "+cpu" build instead of a CUDA
-# build (CUDA wheels are much larger and entirely unnecessary here — this
-# project never uses a GPU in production).
---extra-index-url https://download.pytorch.org/whl/cpu
-
-torch==2.13.0+cpu
-torchaudio==2.11.0+cpu
-transformers==5.15.1
+# pip.
 huggingface_hub==1.28.0
-safetensors==0.8.0
+onnxruntime==1.29.0
 numpy==2.5.2
 scipy==1.18.1
 soundfile==0.14.0
@@ -22,3 +26,18 @@ PyYAML==6.0.3
 psutil==7.2.2
 streamlit==1.62.0
 matplotlib==3.11.1
+# Pure-Python (no system libraries, no LibreOffice/Chrome dependency) PDF
+# generation for the premium downloadable analysis report -- see
+# app/reporting/pdf_report.py and docs/reporting.md. Small footprint,
+# generates bytes in memory, confirmed Streamlit Community Cloud compatible.
+reportlab==4.2.5
+# Video URL analysis is served by a separately-run LOCAL URL INGESTION
+# HELPER (local_helper/, see docs/local_url_helper.md), never by this
+# deployed application retrieving YouTube media itself -- Streamlit
+# Community Cloud's datacenter egress IP was found to be reliably blocked
+# by YouTube (HTTP 403) even with a PO-token provider. yt-dlp, the Deno
+# runtime, and the PO-token provider therefore moved to
+# requirements-helper.txt (the helper's own, separate dependency set) --
+# they are no longer installed here. This application only talks HTTPS
+# JSON to a user-connected helper (app/analysis/url_helper_client.py).
+requests==2.34.2

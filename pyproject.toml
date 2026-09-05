@@ -4,7 +4,6 @@ version = "0.1.0"
 description = "Detecting AI-generated and cloned voices: a deep learning system for robust audio deepfake detection"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
-license = { text = "MIT" }
 
 # CPU-only ML/audio dependencies for pretrained Wav2Vec2 deepfake detector
 # integration/benchmarking (Phase 2), plus the Streamlit presentation layer
@@ -35,6 +34,29 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+    # Test-only: extracts text from generated PDF reports to assert on
+    # their content (app/reporting/pdf_report.py). NOT part of
+    # requirements.txt / the Streamlit Community Cloud deployment.
+    "pypdf>=5.0",
+]
+# Dev/research-only dependencies for Phase 4 calibration experiments
+# (docs/inference_calibration.md). NOT part of requirements.txt / the
+# Streamlit Community Cloud deployment — calibration is an offline research
+# workflow, not a runtime dependency of the deployed app.
+calibration = [
+    "webrtcvad-wheels>=2.0,<3",
+    "datasets>=3.0,<4",
+    "pyarrow>=17.0",
+    "scikit-learn>=1.5,<2",
+]
+# CPU-only ONNX Runtime investigation (docs/replacement_model_evaluation.md,
+# "ONNX Rescue Investigation" section). NOT part of requirements.txt / the
+# Streamlit Community Cloud deployment unless the ONNX candidate is later
+# selected — this is a research-only dependency for the fairseq-avoidance
+# experiment. onnxruntime (CPU build) only; never onnxruntime-gpu.
+onnx = [
+    "onnxruntime>=1.20,<2",
+    "onnx>=1.17,<2",
 ]
 
 [tool.pytest.ini_options]

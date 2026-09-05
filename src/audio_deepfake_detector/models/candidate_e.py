@@ -1,0 +1,469 @@
+"""Adapter for lab260/Spectra-AASIST3 ("spectra_aasist3_onnx").
+
+Architecture: wav2vec 2.0 XLS-R-300m front-end (standard `transformers`
+`Wav2Vec2Model`, NOT fairseq) -> MLP bridge -> KAN-enhanced AASIST back-end.
+Verified directly from the model's own vendored, self-contained `model.py`
+(no external dependency beyond `transformers`/`torch`/`huggingface_hub`).
+Pre-release/unpublished model -- no peer-reviewed paper; appears in the
+Speech Anti-Spoofing Arena's "Unpublished/Proprietary" tier (listed,
+unranked). Author-reported metrics (README badges, .eval_results/*) are
+maintainer-reported, not project-measured, and must never be presented as
+this project's own results.
+
+STATUS: preprocessing is DOCUMENTED (unlike antideepfake_wav2vec2_onnx,
+candidate_d.py) but not shipped as runnable code in this repo. The model
+card README (lab260/Spectra-AASIST3, verified directly, not via WebFetch
+summarization) states in prose:
+
+    "Preemphasis (0.97) is applied to the full waveform ... then a
+    deterministic first-64,600-sample window (~4.04s; tile-repeat if
+    shorter -- no random crop). No resampling in the wrapper (audio
+    arrives at expected_sample_rate=16000). ... the bona-fide logit
+    (index 1) is the score."
+
+The README also links to `spectra_aasist3.py`/`spectra_aasist3_net.py` as
+"the exact wrapper that produced the Arena scores" -- but neither file
+exists in this repository (confirmed: both resolve HTTP 404). Only the
+vendored network (`model.py`, containing `SpectraAASIST3`/`KANAASIST`) is
+actually present. The exported ONNX graph (`spectra-aasist3.onnx`) confirms
+this network requires a fixed [batch, 64600] float32 input -- consistent
+with the README's documented preprocessing, verified directly from the
+graph, not guessed.
+
+Consequently, unlike candidate_d.py (antideepfake_wav2vec2_onnx), this
+adapter DOES implement predict() -- because the preprocessing recipe is
+adequately specified in prose from the model's own official card, not
+merely implied. One convention is not explicitly spelled out and is
+recorded here as an assumption, not a verified fact:
+
+  - Pre-emphasis first-sample edge handling: this adapter uses the
+    universal DSP convention y[0] = x[0], y[n] = x[n] - 0.97*x[n-1] for
+    n >= 1 (no wrap-around). This is standard across speech-processing
+    toolkits (Kaldi, ESPnet, etc.) for coefficient 0.97 and is not itself
+    an unusual choice, but the README does not spell out this exact edge
+    case, so it is flagged rather than silently assumed to be "obviously"
+    correct.
+
+Score direction (verified from model.py, not assumed): `classify()` reads
+`self.forward(x)[:, 1]` (index 1) and returns `(x > threshold).float()`
+with a baked-in `threshold=-1.0625009` default -- confirming index 1 is
+the bona-fide logit and higher-is-more-bonafide, directly from source, not
+just README prose. This adapter reports the raw bona-fide logit (index 1)
+plus a softmax-derived spoof probability (index 0) for threshold work
+reusing this project's existing `evaluation/metrics.py` (which expects a
+[0, 1] "spoof score", higher = more spoof).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import time
+
+import numpy as np
+
+from audio_deepfake_detector.config.models_config import ModelConfig
+from audio_deepfake_detector.models.base import BaseDeepfakeDetector
+from audio_deepfake_detector.utils.datatypes import (
+    AudioSample,
+    ModelLoadMetadata,
+    PredictionResult,
+    WindowPrediction,
+)
+
+PREEMPHASIS_COEFF = 0.97
+REQUIRED_SAMPLES = 64600
+AUTHOR_DEFAULT_THRESHOLD = -1.0625009  # from model.py SpectraAASIST3.classify(), NOT independently calibrated by this project
+
+# Project-calibrated operating thresholds (spoof-probability convention, higher = spoof),
+# frozen on the calibration subset in results/metrics/spectra_aasist3_split.json (seed=2024),
+# NEVER selected on the evaluation set. See docs/spectra_production_optimization.md.
+FP32_CALIBRATED_THRESHOLD = 0.9299831390380859
+INT8_DYNAMIC_CALIBRATED_THRESHOLD = 0.939693808555603
+
+
+def _sha256_of_file(path: str, chunk_size: int = 1 << 20) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(chunk_size), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def apply_preemphasis(waveform: np.ndarray, coeff: float = PREEMPHASIS_COEFF) -> np.ndarray:
+    """y[0] = x[0], y[n] = x[n] - coeff*x[n-1] for n >= 1.
+
+    Standard DSP convention (first-sample edge case not explicitly spelled
+    out in the model card -- see module docstring).
+    """
+    x = np.asarray(waveform, dtype=np.float32)
+    if x.size == 0:
+        return x
+    y = np.empty_like(x)
+    y[0] = x[0]
+    y[1:] = x[1:] - coeff * x[:-1]
+    return y
+
+
+def window_to_required_length(waveform: np.ndarray, required: int = REQUIRED_SAMPLES) -> np.ndarray:
+    """Deterministic first-`required`-sample crop for clips >= required
+    samples; tile-repeat (np.tile, no random crop) then truncate for
+    shorter clips. Both behaviors are stated explicitly in the model card."""
+    x = np.asarray(waveform, dtype=np.float32)
+    if x.size >= required:
+        return x[:required]
+    if x.size == 0:
+        return np.zeros(required, dtype=np.float32)
+    n_tiles = -(-required // x.size)  # ceil
+    return np.tile(x, n_tiles)[:required]
+
+
+def author_compatible_preprocess(waveform: np.ndarray) -> np.ndarray:
+    """Full pipeline in the documented order: preemphasis on the FULL
+    waveform first, then crop/pad to REQUIRED_SAMPLES -- per the README's
+    own ordering ("Preemphasis ... is applied to the full waveform ...
+    then a deterministic first-64,600-sample window")."""
+    emphasized = apply_preemphasis(waveform)
+    return window_to_required_length(emphasized)
+
+
+def make_sequential_windows(waveform: np.ndarray, window: int = REQUIRED_SAMPLES) -> list[np.ndarray]:
+    """OUR OWN application-level extension (Step 18) -- NOT attributed to
+    the model authors. Non-overlapping sequential windows over the
+    (already preemphasized) full clip, tile-repeat-padding the final
+    partial window. Used only for the full-clip aggregation experiment,
+    never for the author-compatible benchmark score."""
+    emphasized = apply_preemphasis(waveform)
+    if emphasized.size <= window:
+        return [window_to_required_length(emphasized)]
+    windows = []
+    for start in range(0, emphasized.size, window):
+        chunk = emphasized[start : start + window]
+        if chunk.size < window:
+            chunk = window_to_required_length(chunk)
+        windows.append(chunk)
+    return windows
+
+
+def softmax_spoof_bonafide(logits: np.ndarray) -> tuple[float, float]:
+    """logits: shape (2,), index 0 assumed spoof, index 1 = bonafide
+    (verified from model.py's classify()). Returns (spoof_prob, bonafide_prob)."""
+    shifted = logits - np.max(logits)
+    exp = np.exp(shifted)
+    probs = exp / np.sum(exp)
+    return float(probs[0]), float(probs[1])
+
+
+def decide_label(spoof_prob: float, threshold: float) -> str:
+    """THE single authoritative deployment decision rule for this adapter.
+
+    Returns "spoof" if spoof_prob >= threshold else "bonafide".
+
+    This is deliberately the SAME quantity and comparison direction used by
+    the frozen calibration/evaluation pipeline
+    (scripts/run_spectra_int8_evaluation.py: `score_clip()` returns
+    `spoof_prob` from `softmax_spoof_bonafide()`, and
+    `compute_eer`/`compute_threshold_metrics` in
+    evaluation/metrics.py treat any score `>= threshold` as the positive
+    (spoof) class) -- verified directly from that source, not assumed. The
+    calibrated thresholds (FP32_CALIBRATED_THRESHOLD,
+    INT8_DYNAMIC_CALIBRATED_THRESHOLD) are therefore thresholds on
+    `spoof_prob` (a softmax value), NOT on the raw bona-fide logit --
+    see docs/spectra_prediction_semantics_fix.md for the full trace and why
+    an earlier assumption to the contrary was incorrect.
+
+    Because the calibrated threshold for a low-bonafide-FPR operating point
+    sits well above 0.5, a clip can have spoof_prob > 0.5 (i.e. a naive
+    50/50 softmax argmax would call it "spoof") while this function still
+    returns "bonafide" -- that is not a bug, it is the calibrated,
+    low-false-positive-rate decision working as measured (see the frozen
+    evaluation's own spoof_fnr=10%). Callers must not derive the binary
+    label any other way (e.g. from softmax argmax) -- this function is the
+    single source of truth for the deployment decision.
+    """
+    return "spoof" if spoof_prob >= threshold else "bonafide"
+
+
+def presentation_state(spoof_prob: float, threshold: float) -> str:
+    """UI-only ABSTENTION/presentation state. NOT a new model class, and
+    NEVER used for scientific evaluation (see decide_label(), which remains
+    the sole binary decision used for EER/ROC-AUC/F1/FPR/FNR).
+
+    Returns "SPOOF" if spoof_prob >= threshold, "BONAFIDE" if
+    spoof_prob <= 0.5, else "INCONCLUSIVE" for the narrow zone
+    0.5 < spoof_prob < threshold, where the calibrated (low-bonafide-FPR)
+    decision says bonafide but a naive 50/50 softmax split would say spoof.
+    Verified to match the measured disagreement set exactly (12/400 = 3.0%
+    of the frozen calibration+evaluation clips -- see
+    docs/spectra_prediction_semantics_fix.md and
+    docs/spectra_inconclusive_state.md).
+
+    docstring-verified boundary behavior (also unit-tested):
+      spoof_prob == threshold        -> "SPOOF" (>= is inclusive, matches
+                                         decide_label() and
+                                         evaluation/metrics.py's own
+                                         compute_threshold_metrics)
+      spoof_prob just below threshold -> "INCONCLUSIVE"
+      spoof_prob == 0.5              -> "BONAFIDE" (boundary is exclusive
+                                         on the INCONCLUSIVE side: `> 0.5`)
+    """
+    if spoof_prob >= threshold:
+        return "SPOOF"
+    if spoof_prob > 0.5:
+        return "INCONCLUSIVE"
+    return "BONAFIDE"
+
+
+class CandidateSpectraAasist3OnnxDetector(BaseDeepfakeDetector):
+    def __init__(self, model_config: ModelConfig, device: str = "cpu"):
+        if device != "cpu":
+            raise ValueError("This project only supports CPU inference.")
+        self.model_config = model_config
+        self.model_id = model_config.id
+        self.repository = model_config.repository
+        self.device = device
+        self.sample_rate = model_config.sample_rate
+        self.window_seconds = model_config.window_seconds
+        self._session = None
+        self._input_name: str | None = None
+        self._output_name: str | None = None
+        self._input_length: int | None = None
+        self._label_mapping = model_config.label_mapping or {0: "spoof", 1: "bonafide"}
+        # Calibrated decision threshold (spoof-probability convention), selected
+        # automatically from the model_id so callers never have to remember which
+        # artifact needs which threshold -- see docs/spectra_production_optimization.md
+        # (FP32_CALIBRATED_THRESHOLD) and docs/spectra_streamlit_candidate.md
+        # (INT8_DYNAMIC_CALIBRATED_THRESHOLD, frozen on the SAME calibration split,
+        # NEVER the FP32 threshold).
+        self.threshold = (
+            INT8_DYNAMIC_CALIBRATED_THRESHOLD
+            if model_config.id == "spectra_aasist3_onnx_int8"
+            else FP32_CALIBRATED_THRESHOLD
+        )
+
+    def load(self, local_onnx_path: str | None = None) -> ModelLoadMetadata:
+        """`local_onnx_path`: load a local ONNX file (e.g. a quantized
+        variant produced by scripts/run_spectra_int8_evaluation.py) instead
+        of downloading `checkpoint_filename` from the Hub. Used for the
+        INT8 production-optimization experiment (docs/spectra_production_optimization.md);
+        the INT8 artifact is not currently hosted anywhere and must not be
+        committed to this repository (see Step 17 of that document) -- this
+        parameter exists so the same adapter class can be pointed at it
+        locally without inventing a second adapter class."""
+        import onnxruntime as ort
+
+        # torch is NOT a production dependency of this ONNX-only adapter --
+        # it is imported here only if already present (e.g. in a dev/research
+        # environment where other adapters need it), purely to report its
+        # version string in ModelLoadMetadata. On the Streamlit Cloud
+        # deployment path (no torch in requirements.txt, see
+        # docs/spectra_streamlit_candidate.md) this must NOT raise.
+        try:
+            import torch
+
+            torch_version = torch.__version__
+        except ImportError:
+            torch_version = "not installed (ONNX-only production path)"
+
+        if local_onnx_path is not None:
+            ckpt_path = local_onnx_path
+        else:
+            from huggingface_hub import hf_hub_download
+
+            ckpt_path = hf_hub_download(
+                repo_id=self.repository,
+                filename=self.model_config.checkpoint_filename,
+                revision=self.model_config.revision,
+            )
+
+        if self.model_config.expected_sha256:
+            actual_sha256 = _sha256_of_file(ckpt_path)
+            if actual_sha256 != self.model_config.expected_sha256:
+                raise RuntimeError(
+                    f"SHA256 integrity check failed for {ckpt_path}: expected "
+                    f"{self.model_config.expected_sha256}, got {actual_sha256}. "
+                    "Refusing to load a checkpoint that does not match the pinned "
+                    "hash -- see docs/spectra_streamlit_candidate.md."
+                )
+
+        session_options = ort.SessionOptions()
+        session_options.intra_op_num_threads = 2  # see docs/spectra_production_optimization.md Step 11
+        self._session = ort.InferenceSession(
+            ckpt_path, sess_options=session_options, providers=["CPUExecutionProvider"]
+        )
+        if self._session.get_providers() != ["CPUExecutionProvider"]:
+            raise RuntimeError(
+                f"ONNX Runtime selected a non-CPU provider: {self._session.get_providers()}. "
+                "This project is CPU-only."
+            )
+
+        inputs = self._session.get_inputs()
+        outputs = self._session.get_outputs()
+        if len(inputs) != 1 or len(outputs) != 1:
+            raise RuntimeError(
+                f"Unexpected ONNX graph shape: {len(inputs)} inputs, {len(outputs)} outputs "
+                "(expected exactly 1 each)."
+            )
+        self._input_name = inputs[0].name
+        self._output_name = outputs[0].name
+        fixed_dims = [d for d in inputs[0].shape if isinstance(d, int)]
+        if len(fixed_dims) != 1:
+            raise RuntimeError(f"Expected exactly one fixed input dimension, got shape {inputs[0].shape}")
+        self._input_length = fixed_dims[0]
+        if self._input_length != REQUIRED_SAMPLES:
+            raise RuntimeError(
+                f"ONNX graph input length ({self._input_length}) does not match the documented "
+                f"required length ({REQUIRED_SAMPLES}) -- refusing to proceed with a mismatched "
+                "preprocessing assumption."
+            )
+
+        return ModelLoadMetadata(
+            model_id=self.model_id,
+            repository=self.repository,
+            revision=self.model_config.revision,
+            checkpoint_filename=self.model_config.checkpoint_filename,
+            checkpoint_size_bytes=self.model_config.checkpoint_size_bytes,
+            base_architecture=self.model_config.architecture,
+            sample_rate=self.sample_rate,
+            window_seconds=self.window_seconds,
+            label_mapping=self._label_mapping,
+            torch_version=torch_version,
+            transformers_version=None,
+            device=self.device,
+        )
+
+    def _raw_logits(self, window_64600: np.ndarray) -> np.ndarray:
+        if self._session is None:
+            raise RuntimeError("Model not loaded. Call load() before predict().")
+        x = window_64600.astype(np.float32)[None, :]
+        (logits,) = self._session.run([self._output_name], {self._input_name: x})
+        return logits[0]
+
+    def predict(self, audio_sample: AudioSample) -> PredictionResult:
+        """Author-compatible scoring (Step 13): preemphasis on the full
+        clip, then a single deterministic first-64,600-sample window
+        (tile-repeat if shorter). This is the primary formal benchmark
+        path -- NOT this project's own multi-window extension (see
+        predict_full_clip below)."""
+        if self._session is None:
+            raise RuntimeError("Model not loaded. Call load() before predict().")
+
+        window = author_compatible_preprocess(audio_sample.waveform)
+
+        start = time.perf_counter()
+        logits = self._raw_logits(window)
+        inference_time_ms = (time.perf_counter() - start) * 1000.0
+
+        spoof_prob, bonafide_prob = softmax_spoof_bonafide(logits)
+        prob_dict = {"spoof": spoof_prob, "bonafide": bonafide_prob}
+        # decide_label() is the SINGLE authoritative deployment decision --
+        # verified identical to the frozen calibration/evaluation rule, see
+        # its own docstring and docs/spectra_prediction_semantics_fix.md.
+        raw_label = decide_label(spoof_prob, self.threshold)
+        presentation = presentation_state(spoof_prob, self.threshold)
+
+        window_predictions = [
+            WindowPrediction(
+                window_index=0,
+                start_sample=0,
+                end_sample=min(len(audio_sample.waveform), REQUIRED_SAMPLES),
+                raw_label=raw_label,
+                probabilities=prob_dict,
+            )
+        ]
+
+        return PredictionResult(
+            raw_label=raw_label,
+            normalized_label="SPOOF" if raw_label == "spoof" else "BONAFIDE",
+            confidence=prob_dict[raw_label],
+            probabilities=prob_dict,
+            model_id=self.model_id,
+            model_repository=self.repository,
+            device=self.device,
+            inference_time_ms=inference_time_ms,
+            audio_duration_seconds=audio_sample.duration_seconds,
+            windows_analyzed=1,
+            window_predictions=window_predictions,
+            # binary_model_decision mirrors raw_label/normalized_label exactly --
+            # it is the SAME frozen decision used for evaluation, preserved
+            # under an explicit name per docs/spectra_inconclusive_state.md
+            # Step 5, never overwritten by presentation_state.
+            binary_model_decision=raw_label,
+            presentation_state=presentation,
+        )
+
+    def predict_full_clip(self, audio_sample: AudioSample, aggregation: str = "mean") -> dict:
+        """OUR OWN application-level extension (Step 18) -- sequential
+        non-overlapping 64,600-sample windows over the full (preemphasized)
+        clip, aggregated by `aggregation` ('first', 'mean', 'median',
+        'majority'). NOT attributed to the model authors; not used for the
+        author-compatible benchmark (predict())."""
+        if self._session is None:
+            raise RuntimeError("Model not loaded. Call load() before predict_full_clip().")
+        windows = make_sequential_windows(audio_sample.waveform)
+        bonafide_logits = []
+        spoof_probs = []
+        for w in windows:
+            logits = self._raw_logits(w)
+            spoof_prob, _ = softmax_spoof_bonafide(logits)
+            bonafide_logits.append(float(logits[1]))
+            spoof_probs.append(spoof_prob)
+
+        if aggregation == "first":
+            agg_spoof_prob = spoof_probs[0]
+        elif aggregation == "mean":
+            agg_spoof_prob = float(np.mean(spoof_probs))
+        elif aggregation == "median":
+            agg_spoof_prob = float(np.median(spoof_probs))
+        elif aggregation == "majority":
+            agg_spoof_prob = float(np.mean([1.0 if p >= 0.5 else 0.0 for p in spoof_probs]))
+        else:
+            raise ValueError(f"Unknown aggregation: {aggregation}")
+
+        return {
+            "n_windows": len(windows),
+            "window_spoof_probs": spoof_probs,
+            "window_bonafide_logits": bonafide_logits,
+            "aggregation": aggregation,
+            "aggregated_spoof_prob": agg_spoof_prob,
+        }
+
+    def unload(self) -> None:
+        self._session = None
+        import gc
+
+        gc.collect()
+
+    def model_info(self) -> dict:
+        return {
+            "model_id": self.model_id,
+            "repository": self.repository,
+            "revision": self.model_config.revision,
+            "architecture": self.model_config.architecture,
+            "sample_rate": self.sample_rate,
+            "window_seconds": self.window_seconds,
+            "input_length_samples": self._input_length,
+            "label_mapping": self._label_mapping,
+            "device": self.device,
+            "loaded": self._session is not None,
+            "calibrated_threshold_spoof_probability": self.threshold,
+            "expected_sha256": self.model_config.expected_sha256,
+            "author_default_threshold_on_bonafide_logit": AUTHOR_DEFAULT_THRESHOLD,
+            "unpublished_model": True,
+            # UI-facing display metadata (docs/spectra_inconclusive_state.md
+            # Step 6/7) -- the technical-details panel reads these instead of
+            # hardcoding model-specific strings.
+            "display_name": "Spectra-AASIST3 INT8",
+            "architecture_short": "XLS-R-300M + KAN-enhanced AASIST",
+            "runtime": "ONNX Runtime (CPU)",
+            "native_window_description": f"{self._input_length} samples (~{REQUIRED_SAMPLES / self.sample_rate:.2f}s), deterministic first-window, tile-repeat if shorter",
+            "preemphasis_coefficient": PREEMPHASIS_COEFF,
+            "threshold_description": f"{self.threshold:.6f} (spoof probability, not raw logit)",
+            "aggregation_description": (
+                "Author-compatible single deterministic window (first "
+                f"{REQUIRED_SAMPLES} samples of the clip). Multi-window "
+                "aggregation across a full clip is available as a "
+                "project-level application extension "
+                "(predict_full_clip()) but is NOT author-native behavior "
+                "and is not used by the current production analysis path."
+            ),
+        }
