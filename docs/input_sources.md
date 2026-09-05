@@ -291,11 +291,15 @@ lines from `app/analysis/video_url.py`:
 
 - `VIDEO_URL_DIAGNOSTIC: yt_dlp=<version> deno=<runtime or unavailable> ejs=<version or unavailable> ffmpeg=<available/unavailable> platform=youtube video_id=<id> requested_interval=<start>-<end>` —
   emitted immediately before every real audio-retrieval attempt.
-- `VIDEO_URL_FAILURE stage=<metadata|native_audio_download|local_interval_extract> category=<...> exception_type=<...> sanitized_error=<...> [ffmpeg_stderr=<...>]` plus a sanitized traceback —
-  emitted whenever metadata retrieval, the Stage A native download, or the
-  Stage B local ffmpeg interval extraction fails (see "Native download /
-  local interval extraction split" below for what each stage is), using
-  the same failure categories as the UI-facing classifier.
+- `VIDEO_URL_FAILURE stage=<metadata|native_audio_download|native_audio_download_pot_retry|local_interval_extract> category=<...> exception_type=<...> sanitized_error=<...> [ffmpeg_stderr=<...>]` plus a sanitized traceback —
+  emitted whenever metadata retrieval, the Stage A native download (first
+  attempt or the PO-token provider-backed retry), or the Stage B local
+  ffmpeg interval extraction fails (see "Native download / local interval
+  extraction split" and "Proof-of-Origin token support" below), using the
+  same failure categories as the UI-facing classifier.
+- `VIDEO_URL_POT_DIAGNOSTIC provider=<name>-<mode> provider_available=<yes/no> player_client=mweb token_generated=<yes/no/not_attempted>` —
+  emitted after a provider-backed retry is attempted (or immediately, if
+  it could not even start) — see "Proof-of-Origin token support" below.
 
 Verbose yt-dlp DEBUG-level chatter (including yt-dlp's own internal
 JS-runtime/player-client detection lines, e.g. "JS runtimes: deno-2.9.6")
@@ -309,7 +313,9 @@ verbose logging on by default.
 looks like a signed googlevideo.com media URL (kept only as
 `https://<host>/[signed-media-url-redacted]`) and any `sig=`/`signature=`/
 `token=`/`po_token=`/`auth*=`/`cookie=` query parameter anywhere in the
-logged text, then truncates to a bounded length. Plain, unsigned URLs
+logged text, plus (per "Proof-of-Origin token support" below)
+`visitorData`/`dataSyncId`/`rolloutToken`/`deviceExperimentId`/`poToken`/
+`integrityToken` JSON fields, then truncates to a bounded length. Plain, unsigned URLs
 (e.g. the public watch/Shorts page URL itself) are left intact so a log
 line can still identify which video failed. The full `yt-dlp` info
 dictionary is never logged; a video is identified in logs by
@@ -338,15 +344,153 @@ challenge-solver scripts) plus the small pure-Python libraries current
 `"bestaudio/best"` (never a brittle single-container selector like m4a-only
 or mp3-only) — ffmpeg normalizes whatever container is retrieved.
 
-**Documented limitation:** a PO (proof-of-origin) token requirement was
-not observed against the tested public videos in this project's local
-environment; if YouTube begins requiring one from a given deployment's
-egress IP, extraction will surface the same safe "YouTube did not permit
-the application server to retrieve this video's audio" message rather
-than a raw error, but audio retrieval for the affected video will fail
-until (if ever) a PO-token provider is evaluated and added — no such
-provider is installed today, per the explicit "do not add unless actually
-necessary" guidance.
+**Update:** a real Streamlit Cloud deployment DID subsequently hit exactly
+this condition (`HTTP Error 403: Forbidden` from the native downloader,
+with the two-stage architecture above otherwise confirmed working
+correctly) — see "Proof-of-Origin token support" below for the
+provider-backed fallback this project added in response, once concrete
+evidence (not speculation) showed one was actually needed.
+
+### Proof-of-Origin (PO) token support
+
+**Why:** current yt-dlp guidance
+(https://github.com/yt-dlp/yt-dlp-wiki/blob/master/PO%20Token%20Guide.md,
+verified against the live upstream page, not memory) documents that
+YouTube increasingly requires a GVS (Google Video Server) PO Token for
+media requests from the `mweb` client, and that missing one can produce
+`HTTP 403`. This project's own Streamlit Cloud deployment hit exactly that
+403 on the native download stage, with every other part of the two-stage
+architecture (native download, local ffmpeg interval extraction) already
+confirmed working — see the failure this section's provider was added to
+resolve, above.
+
+**Policy (unchanged, see CLAUDE.md and the module docstrings):** public
+content only. This provider path never uses cookies, a Google account,
+OAuth, or a proxy — only the same anonymous PO-token generation path
+unauthenticated `mweb` playback already uses. It was added only after a
+real, observed 403 proved one was needed — not speculatively.
+
+**Provider chosen:** the maintained
+`bgutil-ytdlp-pot-provider` (https://github.com/Brainicism/bgutil-ytdlp-pot-provider),
+pinned at release **1.3.2** (GPL-3.0-only), using its **Deno script mode**
+(no persistent server process, no Docker sidecar — Streamlit Community
+Cloud provides neither; see `app/analysis/pot_provider.py`). Two halves:
+
+- The yt-dlp-side plugin is installed via the pinned PyPI package
+  `bgutil-ytdlp-pot-provider==1.3.2` in `requirements.txt`.
+- The actual token-generation source (a small Deno/TypeScript program,
+  `server/` from the same upstream release) is **vendored** at
+  `third_party/bgutil-ytdlp-pot-provider/server/` — see
+  `third_party/bgutil-ytdlp-pot-provider/VENDORED.md` for the exact pinned
+  commit, license, and attribution. Vendoring (rather than a deploy-time
+  `git clone`) is deterministic and matches this project's existing
+  "pin a release, never track master" policy — it is also the only option,
+  since Streamlit Community Cloud has no arbitrary build/postBuild hook,
+  only `requirements.txt` (pip) and `packages.txt` (apt).
+
+**Native-dependency install:** the vendored server's `canvas` npm package
+(used by its BotGuard-interfacing library) is a native module. It is
+installed lazily, via `deno install --allow-scripts=npm:canvas,npm:@swc/core
+--frozen`, **at most once per process** (`pot_provider.ensure_provider_ready`,
+memoized) — only the first time a plain (non-provider) retrieval attempt
+is declined by YouTube, never at import time, app startup, or on every
+request. `canvas` ships prebuilt binaries for common platforms (confirmed
+locally on Windows: the install completed in ~20s using a downloaded
+prebuilt binary, no compiler invoked) but falls back to compiling from
+source via node-gyp if none matches the exact container image — the apt
+packages below cover that fallback. **This exact install step succeeding
+on Streamlit Community Cloud's actual Linux container is UNVERIFIED from
+this development sandbox** — the local proof only shows a real GVS PO
+token can be generated and used end-to-end on this machine (see
+"Local verification" below); the remaining verification steps needed
+after a real Cloud deployment are listed at the end of this section.
+
+`packages.txt` was extended with `build-essential`, `pkg-config`,
+`libcairo2-dev`, `libpango1.0-dev`, `libjpeg-dev`, `libgif-dev`, and
+`librsvg2-dev` to cover both the prebuilt-binary case (runtime `.so`
+files, pulled in as dependencies of the `-dev` packages) and the
+from-source compile fallback.
+
+**Player client and extractor args:** `pot_provider.provider_extractor_args()`
+returns `{"youtube": {"player_client": ["mweb"]}, "youtubepot-bgutilscript":
+{"server_home": [<absolute path>]}}` — `mweb` per current upstream
+guidance, and an absolute `server_home` derived from this repository's own
+location (`Path(__file__).resolve().parents[2] / "third_party" / ...`),
+never a `~`-relative path (Streamlit Cloud's home-directory layout is not
+something this project depends on).
+
+**Retry policy:** at most **one** provider-backed retry, and only after a
+plain attempt fails with a category that indicates YouTube itself declined
+the request (`YOUTUBE_BOT_CHALLENGE`, `PO_TOKEN_REQUIRED`,
+`YOUTUBE_MEDIA_FORBIDDEN`) — never for network/format/ffmpeg failures the
+provider cannot fix, and never more than once (avoids worsening any
+IP-level rate-limiting). Most videos succeed on the first, provider-free
+attempt, so the (slow, one-time) native-dependency install is only ever
+triggered when actually needed.
+
+**Failure classification** (see `app/analysis/video_url.py`): an `HTTP 403`
+is no longer collapsed into the generic `NATIVE_DOWNLOAD_FAILED` fallback:
+
+- `YOUTUBE_MEDIA_FORBIDDEN` — a 403 occurred (pattern-matched from the
+  exception text, e.g. `"403"` + `"forbidden"`).
+- `PO_TOKEN_PROVIDER_UNAVAILABLE` — the provider-backed retry could not
+  even run (vendored server directory, yt-dlp plugin, or Deno missing, or
+  the one-time native-dependency install failed).
+- `PO_TOKEN_GENERATION_FAILED` — the provider ran but yt-dlp never
+  reported generating a token for this video (detected via yt-dlp's own
+  `"Retrieved a gvs PO Token for <client> client"` debug line — see
+  `_ProviderAttemptLogger`).
+- `YOUTUBE_DATACENTER_BLOCK` — used **only** when a token was confirmed
+  generated for this exact video and the media request still returned
+  403. This is never inferred from a bare 403 alone (per the current
+  guidance's own caution against over-claiming datacenter blocking) — it
+  requires positive evidence the token was not the problem.
+
+All four map to the same user-facing message: *"Online video audio could
+not be retrieved from this hosting environment. You can still analyze the
+recording by uploading the audio or video file directly."* — never a claim
+of "bot detection" unless yt-dlp's own text explicitly said so
+(`YOUTUBE_BOT_CHALLENGE`).
+
+**Diagnostics:** a `VIDEO_URL_POT_DIAGNOSTIC provider=<name>-<mode>
+provider_available=<yes/no> player_client=mweb
+token_generated=<yes/no/not_attempted>` line is logged server-side after
+every provider-backed retry attempt (or immediately, if the retry could
+not even start) — like every other log line in this module, it NEVER
+includes the token value, visitor ID, data-sync ID, rollout token, or
+device experiment ID (`_sanitize_log_text`'s `_SENSITIVE_JSON_FIELD_RE`
+redacts these specifically, since yt-dlp's own verbose debug output
+embeds them in the innertube client-context JSON passed to the
+token-generation subprocess).
+
+**Local verification performed:** the vendored `server/` script was run
+directly (`deno run --allow-all src/generate_once.ts --content-binding
+<video-id>`) and produced a real GVS PO token; a full `yt_dlp.YoutubeDL`
+extraction with `player_client=mweb` + the script-mode provider configured
+retrieved real metadata and logged yt-dlp's own `"Retrieved a gvs PO Token
+for mweb client"` line; the full `extract_audio_interval` retry path was
+exercised (with a monkeypatched first-attempt failure) end-to-end,
+confirming exactly one retry, the correct extractor args on that retry,
+and correct sanitized logging.
+
+**What is NOT yet verified (requires an actual Streamlit Cloud
+deployment):**
+
+1. Whether `canvas`'s native install (prebuilt-binary or from-source via
+   the new `packages.txt` entries) actually succeeds on Streamlit
+   Community Cloud's specific container image.
+2. Whether the one-time `deno install` completes within Streamlit Cloud's
+   free-tier CPU/memory/time limits on a cold container.
+3. Whether a PO token generated this way is actually accepted by YouTube
+   from Streamlit Cloud's egress IP (the local test above proves token
+   *generation* works; it cannot prove YouTube's *server-side acceptance*
+   of a Cloud-originated request, which is exactly what the original 403
+   was about).
+4. If a token is confirmed generated on Cloud and 403 still persists —
+   per this project's own escalation policy, that is the trigger to stop
+   and report Streamlit Cloud's network/IP as likely unsuitable for
+   reliable YouTube media retrieval, rather than reaching for a proxy,
+   cookies, or a Google account.
 
 ### Failure classification
 
@@ -354,7 +498,11 @@ Every URL-ingestion failure is classified internally (never shown
 verbatim to the user) into one of: `URL_INVALID`, `SOURCE_UNAVAILABLE`,
 `NO_AUDIO_STREAM`, `YOUTUBE_BOT_CHALLENGE`, `JS_RUNTIME_UNAVAILABLE`,
 `PO_TOKEN_REQUIRED`, `FORMAT_UNAVAILABLE`, `NETWORK_TIMEOUT`,
-`EXTRACTION_FAILED`, `FFMPEG_FAILED` (see
+`EXTRACTION_FAILED`, `FFMPEG_FAILED`, `NATIVE_DOWNLOAD_FAILED`,
+`FFMPEG_LOCAL_PROCESSING_FAILED`, `YOUTUBE_MEDIA_FORBIDDEN`,
+`PO_TOKEN_PROVIDER_UNAVAILABLE`, `PO_TOKEN_GENERATION_FAILED`,
+`YOUTUBE_DATACENTER_BLOCK` (the last four are described in detail under
+"Proof-of-Origin token support" above; see
 `app/analysis/video_url.py::classify_extraction_error`, a substring-based
 heuristic over the raw — never displayed — exception text). Each category
 maps to a short, professional, traceback-free message; most fall back to
