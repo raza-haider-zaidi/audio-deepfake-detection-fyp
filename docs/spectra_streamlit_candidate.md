@@ -295,7 +295,7 @@ Spectra-AASIST3 INT8 (351/417 MatMul quantized) -> raw logits -> calibrated thre
 
 ## 15. Second Streamlit deployment coordinates (Step 22 — prepared, not deployed)
 
-- **Repository**: `munz-aftab/audio-deepfake-detection-fyp`
+- **Repository**: `raza-haider-zaidi/audio-deepfake-detection-fyp`
 - **Branch**: `feat/spectra-streamlit-candidate`
 - **Main file**: `streamlit_app.py`
 - **Python version**: 3.12

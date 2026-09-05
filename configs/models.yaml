@@ -117,7 +117,7 @@ models:
       PyPI, upstream packaging bug, unrelated to this project); (2) `pip
       install git+https://github.com/facebookresearch/fairseq.git` also
       fails to build. No verified ONNX or transformers-native re-export of
-      this checkpoint exists. Per project policy (CLAUDE.md: never invent
+      this checkpoint exists. Per project policy (docs/development_policy.md: never invent
       an architecture merely to make a checkpoint load), a hand-rolled
       fairseq-to-transformers key-mapping reimplementation was NOT
       attempted, because there is no working fairseq install in this
@@ -174,7 +174,7 @@ models:
       app -- no scoring/preprocessing framework code. No GitHub repository
       for this framework could be found by search. Per the project owner's
       explicit instruction ("do not proceed to scientific evaluation using
-      guessed preprocessing") and CLAUDE.md's no-fabrication policy, this
+      guessed preprocessing") and docs/development_policy.md's no-fabrication policy, this
       adapter's predict() deliberately raises RuntimeError rather than
       guessing the crop/pad/windowing strategy and producing a plausible-
       looking but unverifiable detection result. Consequently no accuracy,
