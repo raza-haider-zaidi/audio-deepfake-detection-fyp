@@ -198,10 +198,55 @@ File, Microphone, Voice Note, and Video File analysis do not import from
 delivery behavior or `yt-dlp` needs to be updated. Any retrieval failure —
 unavailable, deleted, private, age-restricted, geo-restricted, anti-bot
 blocked, or a network timeout — surfaces the same professional message
-("Unable to access this video...") with no extractor stack trace ever
-shown to the user or left in application logs (a silent `yt-dlp` logger
-routes its internal messages to debug-level Python logging instead of
-stdout/stderr).
+("Unable to access this video...") to the user, with no extractor stack
+trace ever shown in the UI. The real, sanitized failure IS written to the
+server-side application log (never the UI) — see "Cloud diagnostics
+logging" below; this is deliberate, so a real production failure is
+diagnosable from Streamlit Cloud's server logs.
+
+### Cloud diagnostics logging
+
+A first deployment of this feature to Streamlit Community Cloud produced
+metadata successfully but failed at audio retrieval with only the generic
+UI message — and nothing useful in the server logs. Root cause: the
+internal yt-dlp logger adapter (`_SilentYDLLogger`) routed `warning()` and
+`error()` calls to Python's `logging.debug()`, and the classified-failure
+log line was also emitted at debug level — so real WARNING/ERROR-level
+yt-dlp diagnostics (JS-runtime status, HTTP errors, bot-challenge/PO-token
+messages, format failures) were silently dropped by the default log level
+before ever reaching Streamlit Cloud's log output.
+
+Fixed by giving `_SilentYDLLogger.warning()`/`.error()` their matching
+real log levels, and by logging two explicit, sanitized, server-log-only
+lines from `app/analysis/video_url.py`:
+
+- `VIDEO_URL_DIAGNOSTIC: yt_dlp=<version> deno=<runtime or unavailable> ejs=<version or unavailable> ffmpeg=<available/unavailable> platform=youtube video_id=<id> requested_interval=<start>-<end>` —
+  emitted immediately before every real audio-retrieval attempt.
+- `VIDEO_URL_FAILURE stage=<metadata|audio_download|ffmpeg_decode> category=<...> exception_type=<...> sanitized_error=<...>` plus a sanitized traceback —
+  emitted whenever metadata retrieval, audio download, or the ffmpeg
+  decode step fails, using the same failure categories as the UI-facing
+  classifier.
+
+Verbose yt-dlp DEBUG-level chatter (including yt-dlp's own internal
+JS-runtime/player-client detection lines, e.g. "JS runtimes: deno-2.9.6")
+is only elevated to INFO when the `ADF_VIDEO_URL_DEBUG=1` environment
+variable is set on the deployment — this can be toggled on temporarily on
+Streamlit Cloud to see exactly which JS-challenge runtime and player
+client yt-dlp resolved for a specific failing video, without leaving
+verbose logging on by default.
+
+**Sanitization:** `_sanitize_log_text()` redacts any URL whose hostname
+looks like a signed googlevideo.com media URL (kept only as
+`https://<host>/[signed-media-url-redacted]`) and any `sig=`/`signature=`/
+`token=`/`po_token=`/`auth*=`/`cookie=` query parameter anywhere in the
+logged text, then truncates to a bounded length. Plain, unsigned URLs
+(e.g. the public watch/Shorts page URL itself) are left intact so a log
+line can still identify which video failed. The full `yt-dlp` info
+dictionary is never logged; a video is identified in logs by
+platform + video ID (extracted from the URL with a local regex, no
+network call), never by dumping a signed stream URL. Streamlit secrets,
+cookies, and auth headers are never read or logged by this module at all
+— it has no code path that touches them.
 
 ### JavaScript runtime and format-selection robustness
 

@@ -32,9 +32,11 @@ from __future__ import annotations
 import ipaddress
 import logging
 import os
+import re
 import shutil
 import socket
 import tempfile
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
@@ -43,6 +45,8 @@ import yt_dlp
 
 from app.analysis.media_ffmpeg import MediaDecodeError, decode_bytes_to_audio_sample
 from audio_deepfake_detector.utils.datatypes import AudioSample
+
+logger = logging.getLogger(__name__)
 
 # Network safety limits. These bound worst-case resource usage on
 # Streamlit Community Cloud -- see docs/input_sources.md, "Minimizing
@@ -139,20 +143,127 @@ class VideoURLError(ValueError):
         self.category = category
 
 
+# --------------------------------------------------------------------------
+# Server-side diagnostic logging. Everything here is SERVER-LOG-ONLY: it is
+# never rendered in the Streamlit UI, which continues to show only the safe
+# messages above. See docs/input_sources.md, "Cloud diagnostics logging".
+# --------------------------------------------------------------------------
+
+DEBUG_ENV_VAR = "ADF_VIDEO_URL_DEBUG"
+
+
+def is_debug_enabled() -> bool:
+    """Gate for verbose yt-dlp diagnostic logging. Off unless an operator
+    sets ADF_VIDEO_URL_DEBUG=1 in the deployment environment -- keeps
+    per-request log volume small by default while allowing it to be
+    switched on temporarily to diagnose a production failure."""
+    return os.environ.get(DEBUG_ENV_VAR, "").strip().lower() in ("1", "true", "yes")
+
+
+# Signed googlevideo.com media URLs, and any query parameter that looks
+# like a token/signature/cookie/auth header, are redacted before anything
+# reaches the log -- never cookies, auth headers, tokens, full signed
+# media URLs, or Streamlit secrets. Full yt-dlp info dictionaries are never
+# logged either; only short, explicitly-built diagnostic lines are.
+_SENSITIVE_URL_RE = re.compile(r"https?://[^\s\"'<>]+", re.IGNORECASE)
+_SENSITIVE_PARAM_RE = re.compile(r"(?i)\b(sig|signature|token|po_?token|auth\w*|cookie)=[^\s&\"'<>]+")
+
+
+def _sanitize_log_text(text: str, *, max_length: int = 600) -> str:
+    """Redact anything that looks like a signed media URL or an
+    auth/token/cookie parameter from a piece of text before it is logged."""
+    if not text:
+        return text
+
+    def _redact_url(match: "re.Match[str]") -> str:
+        url = match.group(0)
+        hostname = (urlparse(url).hostname or "").lower()
+        if "googlevideo" in hostname or "youtube.com" in hostname and ("sig=" in url.lower() or "token" in url.lower()):
+            return f"https://{hostname}/[signed-media-url-redacted]"
+        return url  # plain, unsigned URLs (e.g. the public watch/shorts page URL) are fine to keep
+
+    sanitized = _SENSITIVE_URL_RE.sub(_redact_url, text)
+    sanitized = _SENSITIVE_PARAM_RE.sub(r"\1=[redacted]", sanitized)
+    if len(sanitized) > max_length:
+        sanitized = sanitized[:max_length] + "...[truncated]"
+    return sanitized
+
+
+def _sanitized_traceback(exc: BaseException, *, max_length: int = 2000) -> str:
+    formatted = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    return _sanitize_log_text(formatted, max_length=max_length)
+
+
+_VIDEO_ID_RE = re.compile(r"(?:[?&]v=|/shorts/|youtu\.be/)([A-Za-z0-9_-]{6,})")
+
+
+def _video_id_for_logging(url: str) -> str:
+    """Best-effort, no-network video-ID extraction for log lines -- lets
+    server logs identify which video failed using platform + video ID
+    instead of ever needing to log a full signed stream URL."""
+    match = _VIDEO_ID_RE.search(url or "")
+    return match.group(1) if match else "unknown"
+
+
+def _log_extraction_failure(stage: str, exc: BaseException, category: str) -> None:
+    """The key diagnostic line this module exists to produce: what failed,
+    classified how, with the real (sanitized) exception -- server-log-only,
+    never shown in the Streamlit UI."""
+    logger.error(
+        "VIDEO_URL_FAILURE stage=%s category=%s exception_type=%s sanitized_error=%s\n%s",
+        stage,
+        category,
+        type(exc).__name__,
+        _sanitize_log_text(str(exc)),
+        _sanitized_traceback(exc),
+    )
+
+
+def _log_pre_extraction_diagnostic(url: str, start_seconds: float, end_seconds: float) -> None:
+    """One concise, server-log-only diagnostic line emitted immediately
+    before attempting real audio retrieval -- lets Streamlit Cloud logs
+    show the exact runtime (yt-dlp/deno/ejs/ffmpeg versions) an extraction
+    attempt ran under, without waiting for a failure to happen."""
+    snapshot = diagnostics_snapshot()
+    logger.info(
+        "VIDEO_URL_DIAGNOSTIC: yt_dlp=%s deno=%s ejs=%s ffmpeg=%s platform=youtube video_id=%s requested_interval=%.0f-%.0f",
+        snapshot["yt_dlp_version"],
+        snapshot["js_runtime"] or "unavailable",
+        snapshot["yt_dlp_ejs_version"] or "unavailable",
+        "available" if snapshot["ffmpeg_path"] else "unavailable",
+        _video_id_for_logging(url),
+        start_seconds,
+        end_seconds,
+    )
+
+
 class _SilentYDLLogger:
-    """Routes yt-dlp's own internal logging to Python logging at debug
-    level instead of stdout/stderr -- keeps Streamlit Cloud logs clean and
-    avoids printing raw extractor error text (e.g. anti-bot messages)
-    where it could be mistaken for an unhandled application error."""
+    """Routes yt-dlp's own internal logging to Python's logging system,
+    sanitized.
+
+    Previously `warning`/`error` were both routed to `.debug()`, which is
+    why a real production failure (403, bot challenge, PO-token, missing
+    JS runtime, format failure) never produced anything in Streamlit
+    Cloud's server logs: DEBUG-level records are dropped by the default
+    log level, silently swallowing legitimate WARNING/ERROR-level yt-dlp
+    diagnostics along with the noisy ones. `warning`/`error` now use the
+    matching real log level. Verbose DEBUG-level chatter (including
+    yt-dlp's own internal JS-runtime/player-client detection lines) is
+    only elevated to INFO when ADF_VIDEO_URL_DEBUG is enabled, so log
+    volume stays small by default."""
 
     def debug(self, msg: str) -> None:
-        logging.getLogger(__name__).debug(msg)
+        sanitized = _sanitize_log_text(msg)
+        if is_debug_enabled():
+            logger.info(sanitized)
+        else:
+            logger.debug(sanitized)
 
     def warning(self, msg: str) -> None:
-        logging.getLogger(__name__).debug(msg)
+        logger.warning(_sanitize_log_text(msg))
 
     def error(self, msg: str) -> None:
-        logging.getLogger(__name__).debug(msg)
+        logger.error(_sanitize_log_text(msg))
 
 
 def _hostname_allowed(hostname: str) -> bool:
@@ -246,7 +357,7 @@ def fetch_metadata(url: str) -> VideoURLMetadata:
             info = ydl.extract_info(url, download=False)
     except Exception as exc:  # noqa: BLE001 -- never leak an extractor traceback to the UI
         category = classify_extraction_error(exc)
-        logging.getLogger(__name__).debug("video_url metadata failure classified as %s", category)
+        _log_extraction_failure("metadata", exc, category)
         raise VideoURLError(_safe_message(category), category=category) from exc
 
     if not info:
@@ -319,13 +430,14 @@ def extract_audio_interval(url: str, start_seconds: float, window_seconds: float
         "max_filesize": MAX_URL_DOWNLOAD_BYTES,
         "logger": _SilentYDLLogger(),
     }
+    _log_pre_extraction_diagnostic(url, start_seconds, end_seconds)
     try:
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 ydl.download([url])
         except Exception as exc:  # noqa: BLE001 -- never leak an extractor traceback to the UI
             category = classify_extraction_error(exc)
-            logging.getLogger(__name__).debug("video_url extraction failure classified as %s", category)
+            _log_extraction_failure("audio_download", exc, category)
             raise VideoURLError(_safe_message(category), category=category) from exc
 
         downloaded = sorted(tmp_dir.glob("audio.*"))
@@ -341,6 +453,7 @@ def extract_audio_interval(url: str, start_seconds: float, window_seconds: float
         try:
             audio_sample = decode_bytes_to_audio_sample(raw_bytes, "online_video_audio", source_extension)
         except MediaDecodeError as exc:
+            _log_extraction_failure("ffmpeg_decode", exc, FFMPEG_FAILED)
             raise VideoURLError(
                 "The retrieved audio could not be decoded.", category=FFMPEG_FAILED
             ) from exc
@@ -356,15 +469,6 @@ def extract_audio_interval(url: str, start_seconds: float, window_seconds: float
 # --------------------------------------------------------------------------
 # Developer-only diagnostics (never shown to normal users)
 # --------------------------------------------------------------------------
-
-DEBUG_ENV_VAR = "ADF_VIDEO_URL_DEBUG"
-
-
-def is_debug_enabled() -> bool:
-    """Gate for the diagnostics panel below. Off unless an operator sets
-    ADF_VIDEO_URL_DEBUG=1 in the deployment environment -- this is never
-    surfaced to end users of the Streamlit app by default (Step 13)."""
-    return os.environ.get(DEBUG_ENV_VAR, "").strip().lower() in ("1", "true", "yes")
 
 
 def diagnostics_snapshot() -> dict:
