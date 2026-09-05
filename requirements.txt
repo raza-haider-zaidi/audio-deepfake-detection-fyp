@@ -36,6 +36,26 @@ reportlab==4.2.5
 # release because YouTube's delivery behavior changes frequently and older
 # yt-dlp releases stop resolving formats; this is a convenience input
 # adapter only, never a dependency of normal (file/mic/voice-note/video)
-# detector operation. Pure Python; uses the already-required ffmpeg for
-# any further audio transcoding.
-yt-dlp==2026.8.19
+# detector operation. Uses the already-required ffmpeg for any further
+# audio transcoding.
+#
+# Extras:
+#   [default] pulls yt-dlp-ejs (EJS challenge-solver scripts) plus small
+#     pure-Python libs (mutagen, pycryptodomex, brotli, requests, urllib3,
+#     websockets) that current yt-dlp guidance recommends installing --
+#     without it YouTube extraction silently misses formats/streams that
+#     require solving a JS-based signature challenge.
+#   [deno] pulls the `deno` PyPI package, which bundles a real, self-
+#     contained Deno binary (no system package manager / apt step needed,
+#     so it works unmodified on Streamlit Community Cloud). Current yt-dlp
+#     guidance (https://github.com/yt-dlp/yt-dlp/wiki/EJS) recommends Deno
+#     as the preferred JS-challenge-solving runtime for YouTube; without
+#     ANY JS runtime, yt-dlp logs "YouTube extraction without a JS runtime
+#     has been deprecated" and falls back to a more limited player client
+#     that YouTube is more likely to reject or rate-limit, especially from
+#     a datacenter (cloud) IP address -- this was the root cause of the
+#     "Prepare Selected Audio" failure on the Shorts URL that prompted this
+#     pin. Deployment/memory impact: one extra ~40MB wheel (the bundled
+#     Deno binary); it is only invoked on demand, per video-URL analysis
+#     request, not at import time or app startup.
+yt-dlp[default,deno]==2026.8.19

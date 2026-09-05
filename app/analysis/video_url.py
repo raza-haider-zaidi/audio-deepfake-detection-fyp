@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import os
 import shutil
 import socket
 import tempfile
@@ -62,10 +63,80 @@ UNAVAILABLE_MESSAGE = (
     "file-analysis option instead."
 )
 
+# Internal failure categories -- never shown to the user directly, only used
+# for diagnostics logging and to pick a slightly more specific (but still
+# generic and traceback-free) user-facing message. See
+# docs/input_sources.md, "Failure classification" for what triggers each one.
+URL_INVALID = "URL_INVALID"
+SOURCE_UNAVAILABLE = "SOURCE_UNAVAILABLE"
+NO_AUDIO_STREAM = "NO_AUDIO_STREAM"
+YOUTUBE_BOT_CHALLENGE = "YOUTUBE_BOT_CHALLENGE"
+JS_RUNTIME_UNAVAILABLE = "JS_RUNTIME_UNAVAILABLE"
+PO_TOKEN_REQUIRED = "PO_TOKEN_REQUIRED"
+FORMAT_UNAVAILABLE = "FORMAT_UNAVAILABLE"
+NETWORK_TIMEOUT = "NETWORK_TIMEOUT"
+EXTRACTION_FAILED = "EXTRACTION_FAILED"
+FFMPEG_FAILED = "FFMPEG_FAILED"
+
+# Slightly more specific (but still traceback-free, non-alarming) messages
+# for the failure categories a user can act on differently. Every other
+# category falls back to UNAVAILABLE_MESSAGE -- the raw yt-dlp exception
+# text is NEVER shown, only used internally to pick between these.
+_CATEGORY_MESSAGES = {
+    NO_AUDIO_STREAM: "No usable audio track was found in this video.",
+    JS_RUNTIME_UNAVAILABLE: "Online video extraction is temporarily unavailable on this deployment.",
+    YOUTUBE_BOT_CHALLENGE: "YouTube did not permit the application server to retrieve this video's audio.",
+    PO_TOKEN_REQUIRED: "YouTube did not permit the application server to retrieve this video's audio.",
+}
+
+
+def classify_extraction_error(exc: BaseException) -> str:
+    """Best-effort classification of a raw yt-dlp/ffmpeg exception into one
+    of the internal failure categories above, using substring matching on
+    the (never-shown-to-the-user) exception text. Used only for diagnostics
+    and for choosing a slightly more specific safe message -- classification
+    mistakes are harmless since every category still maps to a safe,
+    traceback-free message."""
+    text = str(exc).lower()
+
+    if "sign in to confirm" in text or "not a bot" in text or "confirm you" in text:
+        return YOUTUBE_BOT_CHALLENGE
+    if "po token" in text or "potoken" in text:
+        return PO_TOKEN_REQUIRED
+    if "no supported javascript runtime" in text or "js runtime" in text or "jsc" in text and "unavailable" in text:
+        return JS_RUNTIME_UNAVAILABLE
+    if "requested format is not available" in text or "format is not available" in text or "no video formats" in text:
+        return FORMAT_UNAVAILABLE
+    if "timed out" in text or "timeout" in text:
+        return NETWORK_TIMEOUT
+    if (
+        "video is unavailable" in text
+        or "video unavailable" in text
+        or "private video" in text
+        or "has been removed" in text
+        or "does not exist" in text
+        or "this video is not available" in text
+        or ("age" in text and "restrict" in text)
+    ):
+        return SOURCE_UNAVAILABLE
+    if "ffmpeg" in text and ("error" in text or "failed" in text):
+        return FFMPEG_FAILED
+    return EXTRACTION_FAILED
+
+
+def _safe_message(category: str) -> str:
+    return _CATEGORY_MESSAGES.get(category, UNAVAILABLE_MESSAGE)
+
 
 class VideoURLError(ValueError):
     """Raised for any URL-ingestion failure. The message is always safe to
-    show directly to a user -- never an extractor stack trace."""
+    show directly to a user -- never an extractor stack trace. `category`
+    is one of the internal failure-category constants above, for
+    diagnostics/logging only."""
+
+    def __init__(self, message: str, category: str = EXTRACTION_FAILED) -> None:
+        super().__init__(message)
+        self.category = category
 
 
 class _SilentYDLLogger:
@@ -174,28 +245,32 @@ def fetch_metadata(url: str) -> VideoURLMetadata:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
     except Exception as exc:  # noqa: BLE001 -- never leak an extractor traceback to the UI
-        raise VideoURLError(UNAVAILABLE_MESSAGE) from exc
+        category = classify_extraction_error(exc)
+        logging.getLogger(__name__).debug("video_url metadata failure classified as %s", category)
+        raise VideoURLError(_safe_message(category), category=category) from exc
 
     if not info:
-        raise VideoURLError(UNAVAILABLE_MESSAGE)
+        raise VideoURLError(UNAVAILABLE_MESSAGE, category=SOURCE_UNAVAILABLE)
 
     extractor = (info.get("extractor_key") or info.get("extractor") or "").lower()
     if "youtube" not in extractor:
         raise VideoURLError(
-            "Only YouTube links are supported for online video analysis right now."
+            "Only YouTube links are supported for online video analysis right now.",
+            category=URL_INVALID,
         )
 
     duration = info.get("duration")
     if duration is not None and duration > MAX_SOURCE_DURATION_SECONDS:
         raise VideoURLError(
             "This video is too long to analyze via a public link. Please download the "
-            "portion you need and use the file-analysis option instead."
+            "portion you need and use the file-analysis option instead.",
+            category=SOURCE_UNAVAILABLE,
         )
 
     formats = info.get("formats") or []
     has_audio = any(f.get("acodec") not in (None, "none") for f in formats) or info.get("acodec") not in (None, "none")
     if not has_audio:
-        raise VideoURLError("This video does not appear to contain an audio track.")
+        raise VideoURLError(_safe_message(NO_AUDIO_STREAM), category=NO_AUDIO_STREAM)
 
     return VideoURLMetadata(
         platform="YouTube",
@@ -233,11 +308,14 @@ def extract_audio_interval(url: str, start_seconds: float, window_seconds: float
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
+        # Robust audio-only selection with a combined-stream fallback -- see
+        # docs/input_sources.md, "Format selection robustness". Never forces
+        # a specific container (m4a/mp3/etc.); ffmpeg normalizes afterward.
         "format": "bestaudio/best",
         "outtmpl": outtmpl,
         "download_ranges": yt_dlp.utils.download_range_func(None, [(max(0.0, start_seconds), end_seconds)]),
         "force_keyframes_at_cuts": True,
-        "socket_timeout": YTDLP_METADATA_TIMEOUT_SECONDS,
+        "socket_timeout": YTDLP_DOWNLOAD_TIMEOUT_SECONDS,
         "max_filesize": MAX_URL_DOWNLOAD_BYTES,
         "logger": _SilentYDLLogger(),
     }
@@ -246,26 +324,90 @@ def extract_audio_interval(url: str, start_seconds: float, window_seconds: float
             with yt_dlp.YoutubeDL(opts) as ydl:
                 ydl.download([url])
         except Exception as exc:  # noqa: BLE001 -- never leak an extractor traceback to the UI
-            raise VideoURLError(UNAVAILABLE_MESSAGE) from exc
+            category = classify_extraction_error(exc)
+            logging.getLogger(__name__).debug("video_url extraction failure classified as %s", category)
+            raise VideoURLError(_safe_message(category), category=category) from exc
 
         downloaded = sorted(tmp_dir.glob("audio.*"))
         if not downloaded:
-            raise VideoURLError("No audio could be retrieved from this video.")
+            raise VideoURLError(_safe_message(NO_AUDIO_STREAM), category=NO_AUDIO_STREAM)
 
         raw_bytes = downloaded[0].read_bytes()
         if not raw_bytes:
-            raise VideoURLError("No audio could be retrieved from this video.")
+            raise VideoURLError(_safe_message(NO_AUDIO_STREAM), category=NO_AUDIO_STREAM)
 
         source_extension = downloaded[0].suffix
 
         try:
             audio_sample = decode_bytes_to_audio_sample(raw_bytes, "online_video_audio", source_extension)
         except MediaDecodeError as exc:
-            raise VideoURLError("The retrieved audio could not be decoded.") from exc
+            raise VideoURLError(
+                "The retrieved audio could not be decoded.", category=FFMPEG_FAILED
+            ) from exc
 
         if audio_sample.duration_seconds <= 0:
-            raise VideoURLError("The selected interval produced no audio.")
+            raise VideoURLError(_safe_message(NO_AUDIO_STREAM), category=NO_AUDIO_STREAM)
 
         return audio_sample, raw_bytes, source_extension
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+# --------------------------------------------------------------------------
+# Developer-only diagnostics (never shown to normal users)
+# --------------------------------------------------------------------------
+
+DEBUG_ENV_VAR = "ADF_VIDEO_URL_DEBUG"
+
+
+def is_debug_enabled() -> bool:
+    """Gate for the diagnostics panel below. Off unless an operator sets
+    ADF_VIDEO_URL_DEBUG=1 in the deployment environment -- this is never
+    surfaced to end users of the Streamlit app by default (Step 13)."""
+    return os.environ.get(DEBUG_ENV_VAR, "").strip().lower() in ("1", "true", "yes")
+
+
+def diagnostics_snapshot() -> dict:
+    """Reports the current URL-ingestion environment: yt-dlp version,
+    yt-dlp-ejs availability, ffmpeg availability, detected JS challenge
+    runtime, and PO-token provider availability. Intended for an
+    operator-only debug panel or deployment log line, never end-user UI."""
+    snapshot: dict = {"yt_dlp_version": getattr(yt_dlp.version, "__version__", "unknown")}
+
+    try:
+        import yt_dlp_ejs
+
+        snapshot["yt_dlp_ejs_version"] = getattr(yt_dlp_ejs, "__version__", "installed")
+    except ImportError:
+        snapshot["yt_dlp_ejs_version"] = None
+
+    snapshot["ffmpeg_path"] = shutil.which("ffmpeg")
+
+    js_runtime = None
+    try:
+        import deno as _deno_pkg
+
+        deno_bin = _deno_pkg.find_deno_bin()
+        if deno_bin:
+            js_runtime = f"deno ({deno_bin})"
+    except Exception:  # noqa: BLE001 -- diagnostics must never raise
+        pass
+    if js_runtime is None:
+        js_runtime = shutil.which("deno") or shutil.which("node")
+    snapshot["js_runtime"] = js_runtime
+
+    try:
+        from yt_dlp.extractor.youtube.jsc._registry import _jsc_providers  # type: ignore[attr-defined]
+
+        snapshot["jsc_providers"] = sorted(_jsc_providers.value.keys())
+    except Exception:  # noqa: BLE001 -- best-effort only, internal yt-dlp layout may change
+        snapshot["jsc_providers"] = "unavailable (internal yt-dlp API not present in this version)"
+
+    try:
+        import bgutil_ytdlp_pot_provider  # noqa: F401
+
+        snapshot["po_token_provider"] = "bgutil-ytdlp-pot-provider (installed)"
+    except ImportError:
+        snapshot["po_token_provider"] = None
+
+    return snapshot
