@@ -1,22 +1,22 @@
-# CLAUDE.md — Development Rules for This Repository
+# Development Policy
 
-Permanent rules for any Claude Code session working in this repository.
-These rules apply across all phases of the project (setup, MVP, research
-extensions) unless the user explicitly overrides one for a specific task.
+Engineering rules that apply across all phases of this project (setup,
+MVP, research extensions). Referenced throughout the codebase (comments,
+docstrings, `configs/models.yaml`) as the source of the project's
+no-fabrication / reproducibility / scope conventions.
 
 ## Environment
 
 - Always use the project-local `.venv` (`.venv\Scripts\python.exe`). Never
   use a global `python`/`py` command without first confirming it resolves to
-  this project's virtual environment — the global `python` command may
-  resolve to an unrelated project's environment on this machine.
+  this project's virtual environment.
 - Do not create, modify, or depend on any virtual environment outside this
   project directory.
 - Target Python 3.12 for compatibility with PyTorch/torchaudio/Transformers.
 - **The production/deployment target is CPU-only.** Install `torch`/
   `torchaudio` from the official CPU wheel index
   (`https://download.pytorch.org/whl/cpu`), never a CUDA build. Do not
-  optimize for or depend on the development machine's GPU. All code must
+  optimize for or depend on a development machine's GPU. All code must
   support `device="cpu"` and `device="auto"`, and `"auto"` must always
   safely fall back to CPU — there is no code path in this project that
   requires CUDA.
@@ -73,11 +73,11 @@ extensions) unless the user explicitly overrides one for a specific task.
 - Use logical, scoped commits with clear messages describing *why* a change
   was made, not just what changed.
 - Avoid destructive commands (`git reset --hard`, `git clean -f`, force
-  pushes, deleting branches) unless explicitly requested by the user.
+  pushes, deleting branches) unless explicitly required.
 - Do not commit `.env`, credentials, API keys, or other secrets.
 
 ## Scope Discipline
 
 - Do not skip ahead of the current phase (e.g. do not start model
   integration, dataset downloads, or Streamlit implementation while still in
-  environment-setup phase) unless explicitly instructed.
+  environment-setup phase) unless explicitly required by the task at hand.

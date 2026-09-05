@@ -59,7 +59,7 @@ Verified 2026-08-26 against: the model's Hugging Face card
   `AdaptiveAvgPool1d` pooling layer, and a `Linear(768, 2)` classifier head.
   Full architecture and preprocessing code is reproduced verbatim in
   `src/audio_deepfake_detector/models/candidate_c.py`'s module docstring.
-  This is exactly the kind of case CLAUDE.md warns about ("never trust a
+  This is exactly the kind of case docs/development_policy.md warns about ("never trust a
   model card's prose alone for architecture") — the prose and the
   `config.json` field both point away from the actual implementation.
 - **Sample rate**: 16kHz
@@ -156,7 +156,7 @@ attempts against this project's `.venv` (Python 3.12.10, Windows, pip
 No verified ONNX export or `transformers`-native re-implementation of this
 specific checkpoint could be found (a targeted search turned up none).
 
-**Per CLAUDE.md policy** ("never invent an architecture merely to make a
+**Per docs/development_policy.md policy** ("never invent an architecture merely to make a
 checkpoint's `state_dict` load"), a hand-rolled fairseq-to-`transformers`
 key-name-mapping reimplementation was **deliberately not attempted**: with
 no working fairseq install available in this environment, there is no
@@ -168,7 +168,7 @@ predictions — worse than not integrating the model at all.
 project. No accuracy, EER, ROC-AUC, F1, latency, or memory numbers for
 `antideepfake_wav2vec2_small` are reported anywhere in this project,
 because none were measured. This is recorded, not worked around, per
-CLAUDE.md's "do not fabricate evaluation results, metrics, or benchmark
+docs/development_policy.md's "do not fabricate evaluation results, metrics, or benchmark
 numbers" and "if a model hasn't been run... say so explicitly."
 
 ### What this blocks (Steps 6, 9–14 of the phase instructions)
@@ -320,7 +320,7 @@ project forward, and the next step should be evaluating a different,
 `transformers`-compatible pretrained model rather than continuing to sink
 effort into a `fairseq`-dependent one. **Outcome A (replace Sara) is
 explicitly not chosen** — there is no reliable, working implementation of
-this candidate to replace anything with, and CLAUDE.md/this phase's own
+this candidate to replace anything with, and docs/development_policy.md/this phase's own
 instructions forbid forcing outcome A regardless.
 
 Recommended next step: prioritize `transformers`-native or ONNX-native
@@ -438,7 +438,7 @@ than 4.0s; and whether the per-utterance `layer_norm` used by the original
 PyTorch model (Section 3) is still applied, and at what stage.
 
 **Per the project owner's explicit instruction** ("do not proceed to
-scientific evaluation using guessed preprocessing") **and CLAUDE.md's
+scientific evaluation using guessed preprocessing") **and docs/development_policy.md's
 no-fabrication policy**, this is marked unresolved rather than guessed.
 `src/audio_deepfake_detector/models/candidate_d.py`
 (`CandidateAntiDeepfakeOnnxDetector`, model id

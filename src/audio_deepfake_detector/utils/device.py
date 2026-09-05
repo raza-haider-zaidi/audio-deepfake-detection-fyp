@@ -19,7 +19,7 @@ def resolve_device(device: str = "cpu") -> str:
             f"Unsupported device '{device}'. Only 'cpu' and 'auto' are supported; "
             "this project's deployment target has no GPU dependency."
         )
-    # "auto" resolves to CPU by design in this phase — see CLAUDE.md /
+    # "auto" resolves to CPU by design in this phase — see docs/development_policy.md /
     # docs/architecture.md. We deliberately do not probe torch.cuda here to
     # keep behavior identical regardless of the development machine's GPU.
     return "cpu"

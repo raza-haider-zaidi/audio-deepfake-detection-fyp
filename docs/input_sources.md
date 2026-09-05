@@ -376,7 +376,7 @@ architecture (native download, local ffmpeg interval extraction) already
 confirmed working — see the failure this section's provider was added to
 resolve, above.
 
-**Policy (unchanged, see CLAUDE.md and the module docstrings):** public
+**Policy (unchanged, see docs/development_policy.md and the module docstrings):** public
 content only. This provider path never uses cookies, a Google account,
 OAuth, or a proxy — only the same anonymous PO-token generation path
 unauthenticated `mweb` playback already uses. It was added only after a

@@ -36,7 +36,7 @@ turns an arbitrary-length input into the model's fixed 4.0s window --
 silence-pad vs. repeat/tile, left/right/center crop, multi-window
 aggregation for longer clips, and whether the same per-utterance layer-norm
 used by the original PyTorch model is still applied before or after that
-crop/pad) is NOT verifiable from any published source. Per CLAUDE.md ("never
+crop/pad) is NOT verifiable from any published source. Per docs/development_policy.md ("never
 invent an architecture merely to make a checkpoint load" -- the same
 principle applies to preprocessing) and the project owner's explicit
 instruction ("do not proceed to scientific evaluation using guessed

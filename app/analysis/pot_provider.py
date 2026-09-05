@@ -14,7 +14,7 @@ Docker sidecar -- appropriate for Streamlit Community Cloud, which
 provides neither).
 
 Policy (see docs/input_sources.md, "Proof-of-Origin token support" and
-CLAUDE.md): PUBLIC content only. This module never touches cookies, a
+docs/development_policy.md): PUBLIC content only. This module never touches cookies, a
 Google account, OAuth, or a proxy -- only the anonymous, public PO-token
 generation path that unauthenticated `mweb` playback already uses.
 

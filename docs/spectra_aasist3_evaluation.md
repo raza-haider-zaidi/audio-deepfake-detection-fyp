@@ -397,7 +397,7 @@ candidate is pursued toward actual deployment, not a decision made here.
   (Sara) to 3% (Spectra) — not an author-reported number, not a different
   dataset, not a proxy metric.
 - However, per Step 3 and Section 3, Spectra-AASIST3 is an **unpublished,
-  non-peer-reviewed** model. This project's own CLAUDE.md and this phase's
+  non-peer-reviewed** model. This project's own docs/development_policy.md and this phase's
   explicit instructions require that this not be glossed over: it should
   not be presented as "the" published state-of-the-art replacement without
   that caveat attached every time this result is cited.

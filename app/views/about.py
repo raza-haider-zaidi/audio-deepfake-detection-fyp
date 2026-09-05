@@ -70,21 +70,23 @@ Developed by
   recording, a voice note, a video's audio track, or a public online video link: the
   file, recording, or link you provide is processed by this hosted application's
   server-side process to produce the current analysis.
-- For online video analysis, the application retrieves only the public media required
-  for the selected analysis interval from the link you provide, and temporarily
-  processes its audio. Only publicly accessible content is retrieved — no login,
-  cookie import, or access-restriction bypass is performed. The retrieved media is not
-  permanently archived, and no history of submitted URLs is stored by this application
-  beyond the current session.
+- For online video analysis, the public video is retrieved by a separate Local URL
+  Ingestion Helper the presenter connects for their own session (see the Video URL
+  source and its documentation); only the selected audio interval is then temporarily
+  transferred to this hosted application for analysis. Only publicly accessible
+  content is retrieved — no login, cookie import, or access-restriction bypass is
+  performed. Nothing is permanently archived, and no history of submitted URLs is
+  stored beyond the current session.
 - Inference is performed by this hosted application's own server-side process — media
-  **does** leave your device to reach that process. This is not a fully client-side/offline
-  tool, and no processing described here happens only on your device.
+  **does** leave your device (and, for online video, the connected helper computer) to
+  reach that process. This is not a fully client-side/offline tool, and no processing
+  described here happens only on your device.
 - Media is processed in memory to produce the current analysis; it is not intentionally
   retained after analysis by this application.
-- Voice notes, video uploads, and online video retrieval that require decoding/
-  transcoding (via ffmpeg, and yt-dlp for online video retrieval) use short-lived
-  temporary files for the duration of that single request only, deleted immediately
-  afterward — never written under the application's own project directory.
+- Voice notes and video uploads that require decoding/transcoding (via ffmpeg) use
+  short-lived temporary files for the duration of that single request only, deleted
+  immediately afterward — never written under the application's own project directory.
+  The connected helper applies the same rule to any media it retrieves.
 - If you run the optional Robustness Analysis, temporary degraded audio copies exist only
   in memory or in a short-lived temporary directory for the duration of that analysis, and
   are deleted immediately afterward.

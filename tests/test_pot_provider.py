@@ -47,7 +47,7 @@ def test_provider_extractor_args_points_at_absolute_server_home():
 
 
 def test_provider_extractor_args_never_includes_cookies_or_proxy_or_credentials():
-    """Policy guard (CLAUDE.md / docs/input_sources.md): this feature is
+    """Policy guard (docs/development_policy.md / docs/input_sources.md): this feature is
     public-content-only -- no cookies, no proxy, no account auth, ever."""
     import json
 

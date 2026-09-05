@@ -225,7 +225,9 @@ def score_samples_spectra(samples: list[AudioSample]) -> np.ndarray:
 def main() -> None:
     import shutil
 
-    ffmpeg = shutil.which("ffmpeg") or r"C:\Users\Shery\AppData\Local\ffmpeg\bin\ffmpeg.exe"
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        raise RuntimeError("ffmpeg was not found on PATH; install it and ensure it is available before running this script.")
     METRICS_DIR.mkdir(parents=True, exist_ok=True)
 
     manifest = load_manifest()
