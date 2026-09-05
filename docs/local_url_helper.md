@@ -99,6 +99,37 @@ availability.
   source (the WAV interval is sent to Streamlit for inference, the same
   as every other source).
 
+## Build/runtime verification status
+
+The standalone Windows build (`scripts/build_local_helper.ps1`) has been
+built and run end-to-end on a real Windows machine: the built
+`Raza Audio URL Helper.exe`, run with its system PATH stripped down to
+just `C:\Windows\System32` (simulating a machine with none of this
+project's development tools installed), correctly bound its local API to
+`127.0.0.1` only, launched its own bundled `tools\cloudflared.exe` (never
+a system copy), reached "Ready", produced a working connection code via
+"Copy Connection", and served real metadata/audio requests for a Shorts
+URL, a normal watch URL, and a >30-second video with a non-zero start
+offset over the actual public `https://*.trycloudflare.com` tunnel URL
+(never `127.0.0.1`) -- ending in a real Spectra-AASIST3 prediction.
+Closing the window terminated both the helper and `cloudflared.exe`
+cleanly (no orphan processes); restarting produced a new tunnel URL and
+token, and the old connection code stopped working immediately.
+
+One issue was found and fixed during this verification: the `deno` JS
+runtime (used by yt-dlp for some signature-challenge formats) is located
+by the `deno` pip package via its installation environment's `Scripts/`
+directory, which does not exist inside a frozen PyInstaller build --
+`scripts/build_local_helper.ps1` now bundles the real `deno.exe` into
+`tools/` alongside `cloudflared.exe`/`ffmpeg.exe`/`ffprobe.exe`, which
+yt-dlp finds via its own PATH lookup (verified against yt-dlp's own
+`_find_exe` source).
+
+Not verified from a development sandbox: connecting an actual deployed
+Streamlit Cloud session to a helper session (requires driving the real
+deployed app's browser UI), and a second/incognito browser session
+against that same deployed app.
+
 ## Development history note
 
 An earlier iteration of this feature ran extraction directly from the

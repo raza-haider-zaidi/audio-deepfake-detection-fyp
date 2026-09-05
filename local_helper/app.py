@@ -35,7 +35,15 @@ class _UvicornThread(threading.Thread):
 
     def __init__(self, app, host: str, port: int) -> None:
         super().__init__(daemon=True)
-        self._config = uvicorn.Config(app, host=host, port=port, log_level="warning", access_log=False)
+        # log_config=None: uvicorn's default logging setup attaches a
+        # StreamHandler to sys.stdout, which is None in a PyInstaller
+        # `--windowed` build (no console) -- that raised "Unable to
+        # configure formatter 'default'" and prevented the server (and
+        # therefore the whole helper) from starting. Our own
+        # logging.basicConfig (see launcher.py, a real log FILE) remains
+        # in effect for anything uvicorn logs through the standard
+        # `logging` module.
+        self._config = uvicorn.Config(app, host=host, port=port, log_level="warning", access_log=False, log_config=None)
         self._server = uvicorn.Server(self._config)
 
     def run(self) -> None:

@@ -43,7 +43,10 @@ def _bundled_cloudflared_path() -> Path | None:
     if getattr(sys, "frozen", False):
         base = Path(sys.executable).resolve().parent
     else:
-        base = Path(__file__).resolve().parent.parent
+        # Development mode: scripts/build_local_helper.ps1 places tools/
+        # directly under local_helper/ (this file's own directory), NOT
+        # the repository root.
+        base = Path(__file__).resolve().parent
     candidate = base / "tools" / "cloudflared.exe"
     return candidate if candidate.is_file() else None
 
