@@ -326,7 +326,7 @@ def test_extraction_failure_logs_category_server_side(monkeypatch, caplog):
     failure_records = [r for r in caplog.records if "VIDEO_URL_FAILURE" in r.message]
     assert failure_records
     assert "category=FORMAT_UNAVAILABLE" in failure_records[0].message
-    assert "stage=audio_download" in failure_records[0].message
+    assert "stage=native_audio_download" in failure_records[0].message
 
 
 @requires_ffmpeg
@@ -383,8 +383,12 @@ class _DownloadingYDL:
         return False
 
     def download(self, urls):
+        # Simulates Stage A: the FULL source audio track is downloaded
+        # (never pre-cut to the requested interval) -- long enough to
+        # cover every start/window combination used across this test file,
+        # since Stage B now performs the real local -ss/-t trim against it.
         path = self.opts["outtmpl"].replace("%(ext)s", "wav")
-        _make_tone_wav(path, duration=6.0)
+        _make_tone_wav(path, duration=20.0)
 
 
 @requires_ffmpeg
@@ -492,6 +496,8 @@ def test_every_failure_category_maps_to_a_traceback_free_message():
         video_url.NETWORK_TIMEOUT,
         video_url.EXTRACTION_FAILED,
         video_url.FFMPEG_FAILED,
+        video_url.NATIVE_DOWNLOAD_FAILED,
+        video_url.FFMPEG_LOCAL_PROCESSING_FAILED,
     ):
         message = video_url._safe_message(category)
         assert raw not in message
@@ -513,6 +519,176 @@ def test_extract_audio_interval_uses_download_timeout_not_metadata_timeout(monke
     monkeypatch.setattr(video_url.yt_dlp, "YoutubeDL", _CapturingYDL)
     video_url.extract_audio_interval("https://www.youtube.com/watch?v=abc123", start_seconds=0.0, window_seconds=5.0)
     assert captured_opts["socket_timeout"] == video_url.YTDLP_DOWNLOAD_TIMEOUT_SECONDS
+
+
+# --------------------------------------------------------------------------
+# Architecture regression (Step 12 of the two-stage hardening pass):
+# extract_audio_interval() must NEVER configure yt-dlp to invoke ffmpeg as
+# a remote/external downloader again -- that is the exact bug that caused
+# "ffmpeg exited with code 8" on Streamlit Cloud (download_ranges +
+# force_keyframes_at_cuts makes yt-dlp run ffmpeg directly against the
+# remote signed media URL). And local ffmpeg processing must always
+# receive a local filesystem path.
+# --------------------------------------------------------------------------
+
+
+@requires_ffmpeg
+def test_native_download_opts_never_configure_ffmpeg_as_remote_downloader(monkeypatch):
+    captured_opts = {}
+
+    class _CapturingYDL(_DownloadingYDL):
+        def __init__(self, opts):
+            captured_opts.update(opts)
+            super().__init__(opts)
+
+    monkeypatch.setattr(video_url.yt_dlp, "YoutubeDL", _CapturingYDL)
+    video_url.extract_audio_interval("https://www.youtube.com/watch?v=abc123", start_seconds=0.0, window_seconds=5.0)
+
+    # These are what make yt-dlp invoke ffmpeg directly against the remote
+    # URL as an external/ranged downloader -- must be absent entirely.
+    assert "download_ranges" not in captured_opts
+    assert "force_keyframes_at_cuts" not in captured_opts
+    assert captured_opts.get("external_downloader") != "ffmpeg"
+    assert "external_downloader_args" not in captured_opts
+    # Format selection stays a robust audio-only preference, not a single
+    # forced container.
+    assert captured_opts["format"] == "bestaudio/best"
+
+
+@requires_ffmpeg
+def test_local_interval_extraction_ffmpeg_input_is_a_local_file(monkeypatch):
+    """Proves Stage B (local interval extraction) never hands ffmpeg a
+    remote URL -- every `-i` argument ffmpeg receives during
+    extract_audio_interval() must be an existing local file path."""
+    monkeypatch.setattr(video_url.yt_dlp, "YoutubeDL", _DownloadingYDL)
+
+    import os
+
+    import app.analysis.media_ffmpeg as media_ffmpeg
+
+    captured_input_paths = []
+    real_subprocess_run = media_ffmpeg.subprocess.run
+
+    def _tracking_run(cmd, *args, **kwargs):
+        # media_ffmpeg.subprocess IS the shared stdlib `subprocess` module
+        # object, so this also sees the test fixture's own synthetic-tone
+        # ffmpeg call (`-f lavfi -i sine=...`) -- skip that one, it is not
+        # part of the code path under test.
+        if "-i" in cmd and "lavfi" not in cmd:
+            input_path = cmd[cmd.index("-i") + 1]
+            # Checked HERE, before the real ffmpeg call and before the
+            # temp directory is cleaned up -- proves ffmpeg is handed an
+            # existing local file, never a remote URL.
+            captured_input_paths.append((input_path, os.path.exists(input_path)))
+        return real_subprocess_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(media_ffmpeg.subprocess, "run", _tracking_run)
+    video_url.extract_audio_interval("https://www.youtube.com/watch?v=abc123", start_seconds=0.0, window_seconds=5.0)
+
+    assert captured_input_paths, "expected at least one ffmpeg -i invocation"
+    for input_path, existed_at_call_time in captured_input_paths:
+        assert not input_path.lower().startswith(("http://", "https://"))
+        assert existed_at_call_time, f"ffmpeg -i target {input_path!r} did not exist as a local file at call time"
+
+
+def test_native_download_failure_uses_native_download_failed_fallback_category():
+    """A native-download-stage exception that matches no specific pattern
+    must fall back to NATIVE_DOWNLOAD_FAILED (not the shared generic
+    EXTRACTION_FAILED), so logs distinguish which stage failed."""
+    category = video_url.classify_extraction_error(
+        RuntimeError("some completely novel yt-dlp download error"),
+        default=video_url.NATIVE_DOWNLOAD_FAILED,
+    )
+    assert category == video_url.NATIVE_DOWNLOAD_FAILED
+
+
+@requires_ffmpeg
+def test_local_ffmpeg_failure_is_classified_separately_from_native_download_failure(monkeypatch, caplog):
+    """Step 8: a native-download success followed by a local ffmpeg
+    failure must be classified as FFMPEG_LOCAL_PROCESSING_FAILED, distinct
+    from any native-download-stage category."""
+
+    class _BadAudioYDL(_DownloadingYDL):
+        def download(self, urls):
+            # Native download "succeeds" but writes unusable garbage bytes
+            # instead of real audio -- simulates ffmpeg being handed a
+            # corrupt/incompatible local file at Stage B.
+            path = self.opts["outtmpl"].replace("%(ext)s", "bin")
+            with open(path, "wb") as fh:
+                fh.write(b"not a real media file")
+
+    monkeypatch.setattr(video_url.yt_dlp, "YoutubeDL", _BadAudioYDL)
+    with caplog.at_level("ERROR", logger="app.analysis.video_url"):
+        with pytest.raises(VideoURLError) as excinfo:
+            video_url.extract_audio_interval("https://www.youtube.com/watch?v=abc123", start_seconds=0.0, window_seconds=5.0)
+
+    assert excinfo.value.category == video_url.FFMPEG_LOCAL_PROCESSING_FAILED
+
+    failure_records = [r for r in caplog.records if "VIDEO_URL_FAILURE" in r.message]
+    assert failure_records
+    assert "stage=local_interval_extract" in failure_records[0].message
+    assert "category=FFMPEG_LOCAL_PROCESSING_FAILED" in failure_records[0].message
+
+
+@requires_ffmpeg
+def test_local_ffmpeg_failure_logs_sanitized_stderr(monkeypatch, caplog):
+    """Step 9: when local ffmpeg processing fails, its stderr must be
+    captured and logged (sanitized), so a failure is never just an opaque
+    'ffmpeg exited with code N' with no context."""
+
+    class _BadAudioYDL(_DownloadingYDL):
+        def download(self, urls):
+            path = self.opts["outtmpl"].replace("%(ext)s", "bin")
+            with open(path, "wb") as fh:
+                fh.write(b"not a real media file")
+
+    monkeypatch.setattr(video_url.yt_dlp, "YoutubeDL", _BadAudioYDL)
+    with caplog.at_level("ERROR", logger="app.analysis.video_url"):
+        with pytest.raises(VideoURLError):
+            video_url.extract_audio_interval("https://www.youtube.com/watch?v=abc123", start_seconds=0.0, window_seconds=5.0)
+
+    failure_records = [r for r in caplog.records if "VIDEO_URL_FAILURE" in r.message]
+    assert failure_records
+    assert "ffmpeg_stderr=" in failure_records[0].message
+
+
+def test_media_decode_error_carries_stderr_without_changing_message():
+    exc = video_url.MediaDecodeError("safe message", stderr="raw ffmpeg stderr detail")
+    assert str(exc) == "safe message"
+    assert exc.stderr == "raw ffmpeg stderr detail"
+
+
+# --------------------------------------------------------------------------
+# Duration cap enforced before Stage A (native download) starts
+# --------------------------------------------------------------------------
+
+
+def test_extract_audio_interval_rejects_known_long_duration_before_download(monkeypatch):
+    called = {"download": False}
+
+    class _ShouldNotBeCalledYDL:
+        def __init__(self, opts):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def download(self, urls):
+            called["download"] = True
+
+    monkeypatch.setattr(video_url.yt_dlp, "YoutubeDL", _ShouldNotBeCalledYDL)
+    with pytest.raises(VideoURLError) as excinfo:
+        video_url.extract_audio_interval(
+            "https://www.youtube.com/watch?v=abc123",
+            start_seconds=0.0,
+            window_seconds=5.0,
+            known_duration_seconds=video_url.MAX_SOURCE_DURATION_SECONDS + 1,
+        )
+    assert excinfo.value.category == video_url.SOURCE_UNAVAILABLE
+    assert called["download"] is False
 
 
 # --------------------------------------------------------------------------

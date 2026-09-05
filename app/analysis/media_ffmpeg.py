@@ -38,7 +38,13 @@ FFMPEG_DECODE_TIMEOUT_SECONDS = 60
 class MediaDecodeError(ValueError):
     """Raised when ffmpeg/ffprobe is unavailable, or the media cannot be
     probed/decoded/extracted. Always carries a message safe to show to a
-    friendly-error wrapper upstream."""
+    friendly-error wrapper upstream. `stderr` (if any) is the raw ffmpeg
+    stderr output -- never shown to a user, but available for a caller to
+    log server-side for diagnostics (see app/analysis/video_url.py)."""
+
+    def __init__(self, message: str, *, stderr: str = "") -> None:
+        super().__init__(message)
+        self.stderr = stderr
 
 
 def ffmpeg_path() -> str | None:
@@ -72,7 +78,7 @@ def probe_file(path: str) -> ProbedMedia:
 
     try:
         proc = subprocess.run(
-            [ffprobe, "-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", path],
+            [ffprobe, "-v", "error", "-print_format", "json", "-show_format", "-show_streams", path],
             capture_output=True,
             text=True,
             timeout=FFMPEG_PROBE_TIMEOUT_SECONDS,
@@ -80,7 +86,7 @@ def probe_file(path: str) -> ProbedMedia:
         )
         info = json.loads(proc.stdout)
     except (subprocess.SubprocessError, json.JSONDecodeError, OSError) as exc:
-        raise MediaDecodeError("This file could not be read as media.") from exc
+        raise MediaDecodeError("This file could not be read as media.", stderr=getattr(exc, "stderr", "") or "") from exc
 
     fmt = info.get("format", {})
     streams = info.get("streams", [])
@@ -121,7 +127,10 @@ def _run_ffmpeg_decode(input_path: str, output_wav_path: str, *, start_seconds: 
         raise MediaDecodeError("Audio decoding timed out or failed.") from exc
 
     if proc.returncode != 0:
-        raise MediaDecodeError("This file's audio track could not be decoded (unsupported or corrupted media).")
+        raise MediaDecodeError(
+            "This file's audio track could not be decoded (unsupported or corrupted media).",
+            stderr=proc.stderr or "",
+        )
 
 
 def decode_bytes_to_audio_sample(data: bytes, source_name: str, suffix: str) -> AudioSample:

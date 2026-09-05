@@ -206,7 +206,9 @@ def from_video_url(
     the returned input is computed from the actual extracted audio bytes,
     never from the URL itself."""
     try:
-        audio_sample, raw_bytes, source_extension = _extract_url_audio_interval(url, start_seconds, window_seconds)
+        audio_sample, raw_bytes, source_extension = _extract_url_audio_interval(
+            url, start_seconds, window_seconds, known_duration_seconds=metadata.duration_seconds
+        )
     except VideoURLError as exc:
         raise UserFacingError(str(exc)) from exc
 
