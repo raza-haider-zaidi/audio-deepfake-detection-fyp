@@ -2,7 +2,7 @@
 
 **Detecting AI-Generated and Cloned Voices: A Deep Learning System for Robust Audio Deepfake Detection**
 
-Final-year Computer Science project.
+Final-year Computer Science project. Author: Syed Raza Haider Zaidi.
 
 ## Purpose
 

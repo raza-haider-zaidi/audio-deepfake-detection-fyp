@@ -18,6 +18,8 @@ from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from typing import Any
 
+from app.branding import display_model_artifact
+
 DISCLAIMER_TEXT = (
     "Research prototype. This detector should not be used as the sole basis for "
     "forensic, legal, security, disciplinary, or identity decisions. Detection "
@@ -32,6 +34,7 @@ SOURCE_DISPLAY_LABELS = {
     "microphone": "Microphone Capture",
     "voice_note": "Voice Note",
     "video_audio": "Video Audio Track",
+    "video_url": "Online Video",
 }
 
 
@@ -121,7 +124,7 @@ def build_report_data(
             "display_name": model_info.get("display_name"),
             "architecture": model_info.get("architecture_short"),
             "runtime": model_info.get("runtime"),
-            "repository": model_info.get("repository"),
+            "repository": display_model_artifact(model_info.get("repository")),
             "revision": model_info.get("revision"),
             "threshold_description": model_info.get("threshold_description"),
         },
@@ -185,7 +188,7 @@ def render_html_report(report_data: dict) -> str:
   table {{ width:100%; border-collapse:collapse; font-size:0.88rem; }}
   td {{ padding:0.35rem 0.5rem; border-bottom:1px solid #232c3a; }}
   td.label {{ color:#8b96a8; width:40%; }}
-  td.value {{ color:#e8ecf1; font-family: ui-monospace, monospace; }}
+  td.value {{ color:#e8ecf1; font-family: ui-monospace, monospace; word-break: break-all; }}
   .disclaimer {{ margin-top:2rem; font-size:0.8rem; color:#8b96a8; border-top:1px solid #232c3a; padding-top:1rem; }}
 </style>
 </head>
@@ -203,7 +206,7 @@ def render_html_report(report_data: dict) -> str:
     {_row("Sample rate", f"{ai['sample_rate_hz']} Hz")}
     {_row("Format", ai["format"])}
     {_row("Channels", ai["channels"])}
-    {"".join(_row(k.replace('_', ' ').title(), v) for k, v in (ai.get("source_metadata") or {}).items())}
+    {"".join(_row(k.replace('_', ' ').title(), v) for k, v in (ai.get("source_metadata") or {}).items() if k != "format")}
   </table>
 
   <h2>Result</h2>
