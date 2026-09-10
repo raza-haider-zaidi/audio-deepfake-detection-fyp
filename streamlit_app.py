@@ -13,7 +13,8 @@ frozen Spectra-AASIST3 classification.
 Navigation is native Streamlit top navigation (st.navigation with
 position="top"), NOT the default sidebar and NOT the legacy file-based
 pages/ multipage convention. Each destination is a thin `render()`
-function under app/views/, registered once in app/nav.py.
+function under app/views/. Fresh page objects are built for every script run
+by app/nav.py so page execution state is never shared between sessions.
 
 Run locally with:
     .\\.venv\\Scripts\\python.exe -m streamlit run streamlit_app.py
@@ -40,9 +41,9 @@ st.set_page_config(
 
 st.markdown(inject_global_styles(), unsafe_allow_html=True)
 
-from app.nav import ALL_PAGES  # noqa: E402
+from app.nav import create_navigation_pages  # noqa: E402
 
 render_page_header()
 
-page = st.navigation(ALL_PAGES, position="top")
+page = st.navigation(create_navigation_pages(), position="top")
 page.run()

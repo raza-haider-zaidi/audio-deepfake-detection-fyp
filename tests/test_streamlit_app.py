@@ -31,6 +31,37 @@ def test_app_renders_without_error(app):
     assert not app.exception
 
 
+def test_navigation_uses_fresh_page_objects(monkeypatch):
+    from app import nav
+
+    class PageProbe:
+        def __init__(self, page, **metadata):
+            self.page = page
+            self.metadata = metadata
+
+    monkeypatch.setattr(nav.st, "Page", PageProbe)
+    first = nav.create_navigation_pages()
+    second = nav.create_navigation_pages()
+
+    assert [page.metadata["title"] for page in first] == [
+        "Analyze",
+        "Batch",
+        "Robustness",
+        "Evaluation",
+        "Methodology",
+        "About",
+    ]
+    assert first[0].metadata["default"] is True
+    assert all(page.page.__module__.startswith("app.views.") for page in first)
+    assert all(left is not right for left, right in zip(first, second, strict=True))
+
+
+def test_app_survives_repeated_reruns(app):
+    app.run(timeout=30)
+    app.run(timeout=30)
+    assert not app.exception
+
+
 def test_app_headline_present(app):
     text = _all_markdown_text(app)
     assert "Detect synthetic and cloned speech" in text

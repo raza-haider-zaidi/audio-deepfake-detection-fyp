@@ -45,6 +45,7 @@ from app.analysis.url_helper_client import (
 )
 from app.components import (
     probability_comparison_html,
+    render_analysis_condition,
     render_capability_strip,
     render_disclaimer,
     render_empty_state,
@@ -54,8 +55,12 @@ from app.components import (
     render_hero,
     render_how_it_works,
     render_metric_cards,
+    render_media_identity,
+    render_metadata_card,
+    render_metadata_grid,
     render_professional_table,
     render_result_panel,
+    render_section_gap,
     render_section_title,
     render_why_model,
     threshold_visualization_html,
@@ -152,9 +157,7 @@ def _render_analysis_session_panel() -> None:
             st.rerun()
 
 
-def _render_audio_metadata_inspector(audio_sample, file_bytes: bytes, filename: str, n_segments: int, model_info: dict) -> None:
-    render_section_title("Audio diagnostics", "File, media, analysis, and signal-level information.")
-
+def _inspect_audio_metadata(audio_sample, file_bytes: bytes, filename: str):
     suffix = Path(filename).suffix or ".wav"
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         tmp.write(file_bytes)
@@ -166,74 +169,67 @@ def _render_audio_metadata_inspector(audio_sample, file_bytes: bytes, filename: 
 
     quality = compute_audio_quality(audio_sample.waveform, audio_sample.sample_rate, len(file_bytes), audio_sample.duration_seconds)
     suitability = assess_analysis_suitability(quality)
+    return media, quality, suitability
 
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.markdown("**File**")
-        st.markdown(
-            f"""
-| | |
-|---|---|
-| Filename | {filename} |
-| File size | {len(file_bytes) / 1024:.0f} KB |
-| SHA-256 | `{hashlib.sha256(file_bytes).hexdigest()[:16]}…` |
-            """
-        )
-    with col2:
-        st.markdown("**Media**")
-        st.markdown(
-            f"""
-| | |
-|---|---|
-| Container | {media.container} |
-| Codec | {media.codec} |
-| Bitrate | {media.bitrate_kbps} |
-| Duration | {media.duration_seconds} |
-            """
-        )
-    with col3:
-        st.markdown("**Analysis**")
-        st.markdown(
-            f"""
-| | |
-|---|---|
-| Analysis sample rate | {audio_sample.sample_rate} Hz |
-| Segments | {n_segments} |
-| Native segment length | {model_info.get('native_window_description', 'Not available')} |
-            """
-        )
-    with col4:
-        st.markdown("**Signal**")
-        st.markdown(
-            f"""
-| | |
-|---|---|
-| Peak amplitude | {quality.peak_amplitude:.2f} |
-| RMS level | {quality.rms_level:.3f} |
-| Silence proportion | {quality.silence_ratio * 100:.0f}% |
-| Clipping | {quality.clipping_ratio * 100:.1f}% |
-            """
-        )
 
-    if suitability.level == "Good":
-        st.caption("Analysis conditions: **Good**")
-    else:
-        reason_text = " and ".join(suitability.reasons)
-        icon = ":material/warning:" if suitability.level == "Limited" else ":material/error:"
-        st.warning(
-            f"**{suitability.level} analysis conditions.** This recording contains {reason_text}. "
-            "Detection results should therefore be interpreted cautiously.",
-            icon=icon,
-        )
+def _render_analyzed_media(audio_sample, file_bytes: bytes, filename: str, media) -> None:
+    render_section_title("What was analyzed", "The submitted media identity and the normalized audio used for this result.")
+    render_media_identity(
+        filename,
+        [
+            ("Analysis sample rate", f"{audio_sample.sample_rate} Hz"),
+            ("File size", f"{len(file_bytes) / 1024:.0f} KB"),
+            ("Container", str(media.container)),
+        ],
+    )
+
+
+def _render_technical_diagnostics(file_bytes: bytes, model_info: dict, quality, suitability, media) -> None:
+    full_sha256 = hashlib.sha256(file_bytes).hexdigest()
+    render_section_title(
+        "Technical diagnostics",
+        "Secondary media, signal, and reproducibility details for research inspection.",
+    )
+    render_analysis_condition(suitability.level, suitability.reasons)
     st.caption(
         "This assessment is a descriptive signal-quality check and does not influence the "
         "detector's classification, threshold, or presentation state."
     )
-    return quality, suitability
+    with st.expander("Recording and runtime details"):
+        render_metadata_grid(
+            [
+                (
+                    "Media",
+                    [
+                        ("Codec", str(media.codec)),
+                        ("Bitrate", str(media.bitrate_kbps)),
+                    ],
+                ),
+                (
+                    "Analysis",
+                    [
+                        ("Native segment length", str(model_info.get("native_window_description", "Not available"))),
+                    ],
+                ),
+                (
+                    "Signal",
+                    [
+                        ("Peak amplitude", f"{quality.peak_amplitude:.2f}"),
+                        ("RMS level", f"{quality.rms_level:.3f}"),
+                        ("Silence proportion", f"{quality.silence_ratio * 100:.0f}%"),
+                        ("Clipping", f"{quality.clipping_ratio * 100:.1f}%"),
+                    ],
+                ),
+                (
+                    "Reproducibility",
+                    [("SHA-256", f"{full_sha256[:16]}…", full_sha256)],
+                ),
+            ]
+        )
 
 
 def _render_segment_evidence(audio_sample, segment_probs, calibrated_threshold) -> None:
-    st.divider()
+    render_section_gap()
     render_section_title(
         "Segment evidence",
         f"{len(segment_probs)} non-overlapping ~{SEGMENT_DURATION_SECONDS:.2f}s segments, analyzed as a "
@@ -397,15 +393,15 @@ def _source_video() -> tuple[NormalizedAudioInput | None, bytes | None]:
         return None, None
 
     st.video(data)
-    render_professional_table(
-        ["Field", "Value"],
+    render_metadata_card(
+        "Video file",
         [
-            {"Field": "Filename", "Value": uploaded.name},
-            {"Field": "Container", "Value": probed.container},
-            {"Field": "Video codec", "Value": probed.video_codec or "Not available"},
-            {"Field": "Audio codec", "Value": probed.audio_codec},
-            {"Field": "Video duration", "Value": f"{probed.duration_seconds:.1f} s" if probed.duration_seconds else "Not available"},
-            {"Field": "File size", "Value": f"{len(data) / (1024 * 1024):.1f} MB"},
+            ("Filename", uploaded.name),
+            ("Container", probed.container),
+            ("Video codec", probed.video_codec or "Not available"),
+            ("Audio codec", probed.audio_codec),
+            ("Video duration", f"{probed.duration_seconds:.1f} s" if probed.duration_seconds else "Not available"),
+            ("File size", f"{len(data) / (1024 * 1024):.1f} MB"),
         ],
     )
 
@@ -531,17 +527,14 @@ def _source_video_url() -> tuple[NormalizedAudioInput | None, bytes | None]:
 
     if metadata.thumbnail_url:
         st.image(metadata.thumbnail_url, width=320)
-    render_professional_table(
-        ["Field", "Value"],
+    render_metadata_card(
+        "Online video",
         [
-            {"Field": "Platform", "Value": metadata.platform},
-            {"Field": "Video title", "Value": metadata.title},
-            {
-                "Field": "Duration",
-                "Value": _format_hms(metadata.duration_seconds) if metadata.duration_seconds else "Not available",
-            },
-            {"Field": "Channel / uploader", "Value": metadata.uploader or "Not available"},
-            {"Field": "Audio availability", "Value": "Available"},
+            ("Platform", metadata.platform),
+            ("Video title", metadata.title),
+            ("Duration", _format_hms(metadata.duration_seconds) if metadata.duration_seconds else "Not available"),
+            ("Channel / uploader", metadata.uploader or "Not available"),
+            ("Audio availability", "Available"),
         ],
     )
 
@@ -650,42 +643,39 @@ def render() -> None:
     file_key = f"{normalized_input.source_type}:{normalized_input.sha256}"
 
     if is_video_url_source:
-        st.markdown(
-            f"""
-| | |
-|---|---|
-| Platform | {normalized_input.source_metadata.get('platform', 'Not available')} |
-| Video | {normalized_input.source_metadata.get('source_title', filename)} |
-| Extracted audio duration | {audio_sample.duration_seconds:.2f} s |
-| Analyzed interval | {normalized_input.source_metadata['selected_interval']} |
-| Source | {normalized_input.source_label} |
-            """
+        render_metadata_card(
+            "Prepared audio",
+            [
+                ("Platform", normalized_input.source_metadata.get("platform", "Not available")),
+                ("Video", normalized_input.source_metadata.get("source_title", filename)),
+                ("Extracted audio duration", f"{audio_sample.duration_seconds:.2f} s"),
+                ("Analyzed interval", normalized_input.source_metadata["selected_interval"]),
+                ("Source", normalized_input.source_label),
+            ],
         )
     elif is_video_source:
-        st.markdown(
-            f"""
-| | |
-|---|---|
-| Extracted audio duration | {audio_sample.duration_seconds:.2f} s |
-| Analyzed interval | {normalized_input.source_metadata['selected_interval']} |
-| Source | {normalized_input.source_label} |
-            """
+        render_metadata_card(
+            "Prepared audio",
+            [
+                ("Extracted audio duration", f"{audio_sample.duration_seconds:.2f} s"),
+                ("Analyzed interval", normalized_input.source_metadata["selected_interval"]),
+                ("Source", normalized_input.source_label),
+            ],
         )
     else:
         workspace_col, meta_col = st.columns([2, 1])
         with workspace_col:
             st.audio(file_bytes)
         with meta_col:
-            st.markdown(
-                f"""
-| | |
-|---|---|
-| Filename | {filename} |
-| Duration | {audio_sample.duration_seconds:.2f} s |
-| Sample rate | {audio_sample.sample_rate} Hz |
-| Source | {normalized_input.source_label} |
-| File size | {len(file_bytes) / 1024:.0f} KB |
-            """
+            render_metadata_card(
+                "Audio file",
+                [
+                    ("Filename", filename),
+                    ("Duration", f"{audio_sample.duration_seconds:.2f} s"),
+                    ("Sample rate", f"{audio_sample.sample_rate} Hz"),
+                    ("Source", normalized_input.source_label),
+                    ("File size", f"{len(file_bytes) / 1024:.0f} KB"),
+                ],
             )
 
     analyze_label = "Analyze Recording" if normalized_input.source_type == SOURCE_MICROPHONE else "Analyze Audio"
@@ -769,69 +759,69 @@ def render() -> None:
         if summary["is_inconclusive"] and calibrated_threshold is not None:
             extra_html += threshold_visualization_html(result.probabilities["spoof"], calibrated_threshold)
 
-        st.markdown("")
         n_segments = len(segment_probs) if segment_probs else 1
-        result_col, detail_col = st.columns([2, 1])
-        with result_col:
-            render_result_panel(state, summary["prediction"], _explanation_for_state(state), extra_html)
-            st.caption(f"SOURCE · {normalized_input.source_label}")
-            if normalized_input.source_type == SOURCE_MICROPHONE:
-                st.caption(
-                    "Acoustic capture advisory: audio recorded through a loudspeaker and microphone may "
-                    "differ substantially from the original source. Room acoustics, playback equipment, "
-                    "microphone processing and background noise can affect detector output."
-                )
-        with detail_col:
-            st.markdown("**Analysis details**")
-            st.markdown(
-                f"""
-| | |
-|---|---|
-| Duration | {result.audio_duration_seconds:.1f} sec |
-| Segments | {n_segments} |
-| Analysis time | {result.inference_time_ms / 1000:.1f} sec |
-| Runtime | CPU / ONNX |
-                """
+        acoustic_advisory = None
+        if normalized_input.source_type == SOURCE_MICROPHONE:
+            acoustic_advisory = (
+                "Acoustic capture advisory: audio recorded through a loudspeaker and microphone may "
+                "differ substantially from the original source. Room acoustics, playback equipment, "
+                "microphone processing and background noise can affect detector output."
             )
+        render_result_panel(
+            state,
+            summary["prediction"],
+            _explanation_for_state(state),
+            extra_html,
+            source_label=normalized_input.source_label,
+            metadata=[
+                ("Duration", f"{result.audio_duration_seconds:.1f} sec"),
+                ("Segments", str(n_segments)),
+                ("Analysis time", f"{result.inference_time_ms / 1000:.1f} sec"),
+                ("Runtime", "CPU / ONNX"),
+            ],
+            advisory=acoustic_advisory,
+        )
 
         agreement = compute_segment_agreement(segment_probs) if segment_probs else None
-        with st.expander("Why this result?"):
-            for sentence in evidence_summary_sentences(state, result.probabilities["spoof"], calibrated_threshold, agreement):
-                st.markdown(f"- {sentence}")
-
-        st.divider()
-        metadata_probe_bytes = file_bytes if file_bytes is not None else audio_sample.waveform.tobytes()
-        metadata_probe_filename = filename if file_bytes is not None else "clip.wav"
-        quality, suitability = _render_audio_metadata_inspector(audio_sample, metadata_probe_bytes, metadata_probe_filename, n_segments, model_info)
+        with st.container(key="result_explanation"):
+            with st.expander("Why this result?"):
+                for sentence in evidence_summary_sentences(state, result.probabilities["spoof"], calibrated_threshold, agreement):
+                    st.markdown(f"- {sentence}")
 
         if segment_probs:
-            rows, agreement = _render_segment_evidence(audio_sample, segment_probs, calibrated_threshold)
-        else:
-            rows = []
+            _, agreement = _render_segment_evidence(audio_sample, segment_probs, calibrated_threshold)
 
-        try:
-            from app.nav import robustness_page
+        render_section_gap()
+        metadata_probe_bytes = file_bytes if file_bytes is not None else audio_sample.waveform.tobytes()
+        metadata_probe_filename = filename if file_bytes is not None else "clip.wav"
+        media, quality, suitability = _inspect_audio_metadata(
+            audio_sample,
+            metadata_probe_bytes,
+            metadata_probe_filename,
+        )
+        _render_analyzed_media(audio_sample, metadata_probe_bytes, filename, media)
 
-            st.page_link(robustness_page, label="Run robustness analysis on this clip", icon=":material/science:")
-        except Exception:  # noqa: BLE001 - nav module optional at import time in isolated tests
-            pass
-
-        st.divider()
+        render_section_gap()
         render_section_title("Waveform / spectrogram", "Visual representations of the submitted waveform and spectral content.")
         viz_col1, viz_col2 = st.columns(2)
         with viz_col1:
-            st.caption("Waveform")
-            st.pyplot(plot_waveform(audio_sample.waveform, audio_sample.sample_rate), clear_figure=True)
+            with st.container(border=True, key="waveform_plot"):
+                st.caption("Waveform")
+                st.pyplot(plot_waveform(audio_sample.waveform, audio_sample.sample_rate), clear_figure=True)
         with viz_col2:
-            st.caption("Mel spectrogram")
-            st.pyplot(plot_mel_spectrogram(audio_sample.waveform, audio_sample.sample_rate), clear_figure=True)
+            with st.container(border=True, key="spectrogram_plot"):
+                st.caption("Mel spectrogram")
+                st.pyplot(plot_mel_spectrogram(audio_sample.waveform, audio_sample.sample_rate), clear_figure=True)
         st.caption(
             "The detector operates on waveform audio directly. This spectrogram is shown for "
             "visual inspection and is not the model input."
         )
 
-        st.divider()
-        render_section_title("Download analysis report")
+        render_section_gap()
+        _render_technical_diagnostics(metadata_probe_bytes, model_info, quality, suitability, media)
+        _render_analysis_session_panel()
+
+        render_section_gap()
         report_rows = segment_table(segment_probs, calibrated_threshold, audio_sample.duration_seconds) if segment_probs else []
         report_data = build_report_data(
             generated_at=datetime.now(),
@@ -857,24 +847,71 @@ def render() -> None:
             source_type=normalized_input.source_type,
             source_metadata=normalized_input.source_metadata,
         )
-        report_col1, report_col2, report_col3 = st.columns(3)
         with st.spinner("Generating report..."):
             pdf_bytes = build_pdf_report(report_data)
-        report_col1.download_button(
-            "Download PDF Report", data=pdf_bytes, file_name=f"{report_data['report_id']}.pdf", mime="application/pdf", type="primary"
-        )
-        report_col2.download_button(
-            "Download HTML report", data=render_html_report(report_data), file_name=f"{report_data['report_id']}.html", mime="text/html"
-        )
-        report_col3.download_button(
-            "Download JSON export", data=render_json_report(report_data), file_name=f"{report_data['report_id']}.json", mime="application/json"
-        )
-        st.caption(f"Report ID: {report_data['report_id']} — a local reproducibility identifier, not a database reference.")
+        try:
+            from app.nav import create_robustness_page
 
-        st.divider()
-        _render_analysis_session_panel()
+            robustness_page = create_robustness_page()
+        except Exception:  # noqa: BLE001 - nav module optional at import time in isolated tests
+            robustness_page = None
 
-        st.divider()
+        with st.container(key="next_actions"):
+            render_section_title("Next steps", "Stress-test this result or export a reproducible analysis record.")
+            robustness_col, report_col = st.columns([1, 2])
+            with robustness_col:
+                with st.container(key="robustness_action"):
+                    st.markdown(
+                        '<div class="adf-action-kicker">Robustness</div>'
+                        '<div class="adf-action-title">Test this clip under degraded conditions</div>'
+                        '<div class="adf-action-body">Compare the result across controlled audio transformations.</div>',
+                        unsafe_allow_html=True,
+                    )
+                    if robustness_page is not None:
+                        st.page_link(
+                            robustness_page,
+                            label="Run robustness analysis on this clip",
+                            icon=":material/science:",
+                            width="stretch",
+                        )
+            with report_col:
+                with st.container(key="report_downloads"):
+                    st.markdown(
+                        '<div class="adf-action-kicker">Report</div>'
+                        '<div class="adf-action-title">Download analysis report</div>'
+                        '<div class="adf-action-body">Choose the format that fits your review or research workflow.</div>',
+                        unsafe_allow_html=True,
+                    )
+                    report_col1, report_col2, report_col3 = st.columns(3)
+                    report_col1.download_button(
+                        "Download PDF Report",
+                        data=pdf_bytes,
+                        file_name=f"{report_data['report_id']}.pdf",
+                        mime="application/pdf",
+                        type="primary",
+                        width="stretch",
+                    )
+                    report_col2.download_button(
+                        "Download HTML report",
+                        data=render_html_report(report_data),
+                        file_name=f"{report_data['report_id']}.html",
+                        mime="text/html",
+                        width="stretch",
+                    )
+                    report_col3.download_button(
+                        "Download JSON export",
+                        data=render_json_report(report_data),
+                        file_name=f"{report_data['report_id']}.json",
+                        mime="application/json",
+                        width="stretch",
+                    )
+                    st.markdown(
+                        f'<div class="adf-report-id"><span>Report ID</span><strong>{report_data["report_id"]}</strong>'
+                        "<span>Local reproducibility identifier; not a database reference.</span></div>",
+                        unsafe_allow_html=True,
+                    )
+
+        render_section_gap()
         render_how_it_works()
         render_why_model()
         render_evaluation_section()
