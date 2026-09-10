@@ -7,7 +7,7 @@ from __future__ import annotations
 import streamlit as st
 
 from app.branding import PROJECT_AUTHOR, display_model_artifact
-from app.components import render_section_title
+from app.components import render_metadata_grid, render_section_title
 from app.model_loader import DEPLOYMENT_MODEL_ID, get_detector
 from audio_deepfake_detector.config.models_config import load_models_config
 
@@ -29,33 +29,49 @@ Developed by
     try:
         detector = get_detector(DEPLOYMENT_MODEL_ID)
         info = detector.model_info()
-        st.markdown(
-            f"""
-| | |
-|---|---|
-| Model | {info.get('display_name', DEPLOYMENT_MODEL_ID)} |
-| Deployment | Dynamic INT8 ONNX |
-| Architecture | {info.get('architecture_short', config.architecture)} |
-| Runtime | {info.get('runtime', 'ONNX Runtime CPU')} |
-| Input | {info.get('sample_rate', 16000)} Hz audio |
-| Native segment | {info.get('native_window_description', '')} |
-| Pre-emphasis | {info.get('preemphasis_coefficient', '')} |
-| Threshold | {info.get('threshold_description', '')} |
-| Model artifact | {display_model_artifact(config.repository)} |
-| Revision | `{config.revision}` |
-| License | {config.license} |
-            """
+        render_metadata_grid(
+            [
+                (
+                    "Model",
+                    [
+                        ("Model", info.get("display_name", DEPLOYMENT_MODEL_ID)),
+                        ("Architecture", info.get("architecture_short", config.architecture)),
+                        ("Model artifact", display_model_artifact(config.repository)),
+                        ("License", config.license),
+                    ],
+                ),
+                (
+                    "Deployment",
+                    [
+                        ("Deployment", "Dynamic INT8 ONNX"),
+                        ("Runtime", info.get("runtime", "ONNX Runtime CPU")),
+                        ("Revision", config.revision),
+                    ],
+                ),
+                (
+                    "Input and decision",
+                    [
+                        ("Input", f'{info.get("sample_rate", 16000)} Hz audio'),
+                        ("Native segment", info.get("native_window_description", "")),
+                        ("Pre-emphasis", info.get("preemphasis_coefficient", "")),
+                        ("Threshold", info.get("threshold_description", "")),
+                    ],
+                ),
+            ]
         )
     except Exception:  # noqa: BLE001 - metadata-only page, degrade gracefully
-        st.markdown(
-            f"""
-| | |
-|---|---|
-| Model artifact | {display_model_artifact(config.repository)} |
-| Revision | `{config.revision}` |
-| Architecture | {config.architecture} |
-| License | {config.license} |
-            """
+        render_metadata_grid(
+            [
+                (
+                    "Model",
+                    [
+                        ("Model artifact", display_model_artifact(config.repository)),
+                        ("Revision", config.revision),
+                        ("Architecture", config.architecture),
+                        ("License", config.license),
+                    ],
+                )
+            ]
         )
     st.caption(
         "The upstream Spectra-AASIST3 model is currently pre-release/unpublished — it has no "

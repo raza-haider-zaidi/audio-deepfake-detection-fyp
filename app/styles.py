@@ -52,6 +52,9 @@ SHADOW = {
     "nav": "0 1px 0 rgba(27, 36, 64, 0.06)",
 }
 CONTENT_MAX_WIDTH = "1120px"
+HEADER_HEIGHT = "3.75rem"  # measured Streamlit top-navigation height (60 px)
+CONTENT_TOP_GAP = "1.5rem"
+SECTION_GAP = "2.5rem"
 TRANSITION = "180ms cubic-bezier(0.2, 0.8, 0.2, 1)"
 
 FONT_STACK = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, 'Helvetica Neue', Arial, sans-serif"
@@ -93,10 +96,13 @@ html, body, [data-testid="stAppViewContainer"] {{
     color: {c['text']};
     font-family: {FONT_STACK};
 }}
-[data-testid="stHeader"] {{ background-color: transparent; }}
+[data-testid="stHeader"] {{
+    background-color: {c['surface']};
+    box-shadow: {SHADOW['nav']};
+}}
 .block-container {{
     max-width: {CONTENT_MAX_WIDTH};
-    padding-top: {SPACING['md']};
+    padding-top: calc({HEADER_HEIGHT} + {CONTENT_TOP_GAP});
     padding-bottom: {SPACING['xl']};
 }}
 #MainMenu, footer[data-testid="stFooter"] {{ visibility: hidden; height: 0; }}
@@ -108,15 +114,15 @@ html, body, [data-testid="stAppViewContainer"] {{
 /* ==========================================================================
    2. Top navigation (st.navigation(position="top")) restyling.
    ========================================================================== */
-div[data-testid="stTopNav"], [data-testid="stAppViewBlockContainer"] > div:first-child nav {{
+[data-testid="stTopNavLinkContainer"], div[data-testid="stTopNav"], [data-testid="stAppViewBlockContainer"] > div:first-child nav {{
     background: {c['surface']};
 }}
-[data-testid="stTopNav"] a, [role="tablist"] button {{
+[data-testid="stTopNavLink"], [data-testid="stTopNav"] a, [role="tablist"] button {{
     color: {c['text_muted']} !important;
     font-weight: 550 !important;
     transition: color {TRANSITION} !important;
 }}
-[data-testid="stTopNav"] a[aria-current="page"], [role="tablist"] button[aria-selected="true"] {{
+[data-testid="stTopNavLink"][aria-current="page"], [data-testid="stTopNav"] a[aria-current="page"], [role="tablist"] button[aria-selected="true"] {{
     color: {c['accent_strong']} !important;
 }}
 
@@ -137,6 +143,7 @@ div[data-testid="stTopNav"], [data-testid="stAppViewBlockContainer"] > div:first
 .adf-subtext {{ font-size: 1.05rem; color: {c['text_muted']}; max-width: 660px; line-height: 1.6; margin-bottom: {SPACING['md']}; }}
 .adf-section-title {{ font-size: 1.08rem; font-weight: 700; color: {c['text']}; margin: 0 0 0.25rem 0; }}
 .adf-section-sub {{ font-size: 0.9rem; color: {c['text_muted']}; margin-bottom: {SPACING['sm']}; }}
+.adf-section-gap {{ height: {SECTION_GAP}; }}
 .adf-mono {{ font-family: {MONO_STACK}; font-size: 0.82rem; color: {c['text_muted']}; }}
 .adf-badge {{
     display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.7rem; font-weight: 700;
@@ -178,13 +185,34 @@ div[data-testid="stTopNav"], [data-testid="stAppViewBlockContainer"] > div:first
    ========================================================================== */
 .adf-result {{
     border-radius: {RADIUS['lg']}; border: 1px solid var(--adf-state-border); background: var(--adf-state-bg);
-    padding: {SPACING['lg']}; position: relative; overflow: hidden; animation: adf-fade-in 260ms ease;
+    padding: 1.75rem {SPACING['lg']}; position: relative; overflow: hidden; animation: adf-fade-in 260ms ease;
     box-shadow: {SHADOW['card']};
+    scroll-margin-top: calc({HEADER_HEIGHT} + {CONTENT_TOP_GAP});
 }}
 .adf-result::before {{ content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--adf-state-fg); }}
-.adf-result-eyebrow {{ font-size: 0.72rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--adf-state-fg); margin-bottom: 0.5rem; }}
-.adf-result-title {{ font-size: 1.65rem; font-weight: 750; color: {c['text']}; margin-bottom: 0.5rem; letter-spacing: -0.01em; }}
-.adf-result-explain {{ color: {c['text_muted']}; font-size: 0.96rem; line-height: 1.55; max-width: 640px; }}
+.adf-result-header {{ display: flex; justify-content: space-between; align-items: center; gap: {SPACING['sm']}; margin-bottom: 0.65rem; }}
+.adf-result-eyebrow {{ font-size: 0.72rem; font-weight: 750; letter-spacing: 0.11em; text-transform: uppercase; color: var(--adf-state-fg); }}
+.adf-result-source {{
+    display: inline-flex; align-items: center; max-width: 50%; padding: 0.26rem 0.65rem;
+    border: 1px solid var(--adf-state-border); border-radius: 999px; background: rgba(255,255,255,0.62);
+    color: {c['text_muted']}; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.07em;
+    text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}}
+.adf-result-title {{ font-size: 1.9rem; line-height: 1.2; font-weight: 760; color: {c['text']}; margin-bottom: 0.45rem; letter-spacing: -0.018em; }}
+.adf-result-explain {{ color: {c['text_muted']}; font-size: 0.96rem; line-height: 1.55; max-width: 760px; }}
+.adf-result-confidence {{ max-width: 760px; margin-top: 1.35rem; }}
+.adf-result-meta {{
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px;
+    margin-top: 1.35rem; overflow: hidden; border: 1px solid var(--adf-state-border);
+    border-radius: {RADIUS['md']}; background: var(--adf-state-border);
+}}
+.adf-result-meta-cell {{ min-width: 0; padding: 0.7rem 0.85rem; background: rgba(255,255,255,0.72); }}
+.adf-result-meta-label {{ font-size: 0.68rem; color: {c['text_faint']}; text-transform: uppercase; letter-spacing: 0.06em; }}
+.adf-result-meta-value {{ margin-top: 0.16rem; color: {c['text']}; font-family: {MONO_STACK}; font-size: 0.86rem; font-weight: 700; overflow-wrap: anywhere; }}
+.adf-result-advisory {{
+    margin-top: {SPACING['sm']}; padding-top: {SPACING['sm']}; border-top: 1px solid var(--adf-state-border);
+    color: {c['text_muted']}; font-size: 0.8rem; line-height: 1.5;
+}}
 
 /* ==========================================================================
    6. Probability bars.
@@ -194,6 +222,55 @@ div[data-testid="stTopNav"], [data-testid="stAppViewBlockContainer"] > div:first
 .adf-prob-track {{ flex-grow: 1; height: 9px; border-radius: 999px; background: {c['surface_alt']}; overflow: hidden; }}
 .adf-prob-fill {{ height: 100%; border-radius: 999px; transition: width 400ms ease; }}
 .adf-prob-value {{ width: 54px; flex-shrink: 0; text-align: right; font-family: {MONO_STACK}; font-size: 0.85rem; color: {c['text']}; }}
+
+/* Reusable metadata system: lightweight cards, strips, and media identity. */
+.adf-metadata-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: {SPACING['sm']}; }}
+.adf-metadata-card {{
+    min-width: 0; padding: {SPACING['md']}; background: {c['surface']}; border: 1px solid {c['border']};
+    border-radius: {RADIUS['md']};
+}}
+.adf-metadata-card h3 {{
+    margin: 0 0 0.55rem 0; color: {c['accent_strong']}; font-size: 0.7rem; font-weight: 750;
+    letter-spacing: 0.1em; text-transform: uppercase;
+}}
+.adf-metadata-card dl {{ margin: 0; }}
+.adf-metadata-row {{ padding: 0.48rem 0; border-top: 1px solid {c['border']}; }}
+.adf-metadata-row:first-child {{ border-top: 0; padding-top: 0; }}
+.adf-metadata-row:last-child {{ padding-bottom: 0; }}
+.adf-metadata-row dt {{ color: {c['text_faint']}; font-size: 0.7rem; line-height: 1.3; }}
+.adf-metadata-row dd {{
+    min-width: 0; margin: 0.14rem 0 0; color: {c['text']}; font-size: 0.82rem; font-weight: 650;
+    line-height: 1.35; overflow-wrap: anywhere; word-break: break-word;
+}}
+.adf-metadata-strip {{
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 1px;
+    overflow: hidden; border: 1px solid {c['border']}; border-radius: {RADIUS['md']}; background: {c['border']};
+}}
+.adf-metadata-metric {{ min-width: 0; padding: 0.72rem 0.85rem; background: {c['surface']}; }}
+.adf-metadata-metric-label {{ color: {c['text_faint']}; font-size: 0.68rem; letter-spacing: 0.06em; text-transform: uppercase; }}
+.adf-metadata-metric-value {{
+    margin-top: 0.18rem; color: {c['text']}; font-family: {MONO_STACK}; font-size: 0.86rem;
+    font-weight: 700; overflow-wrap: anywhere;
+}}
+.adf-media-identity {{
+    padding: 1.35rem; border: 1px solid {c['border']}; border-radius: {RADIUS['lg']}; background: {c['surface']};
+    box-shadow: {SHADOW['card']};
+}}
+.adf-media-identity-label {{
+    color: {c['accent_strong']}; font-size: 0.7rem; font-weight: 750; letter-spacing: 0.1em; text-transform: uppercase;
+}}
+.adf-media-identity-name {{
+    margin: 0.38rem 0 1rem; color: {c['text']}; font-size: 1.05rem; font-weight: 700;
+    line-height: 1.4; overflow-wrap: anywhere; word-break: break-word;
+}}
+.adf-condition {{ margin-top: {SPACING['md']}; }}
+.adf-condition-pill {{
+    display: inline-flex; align-items: center; gap: 0.42rem; padding: 0.26rem 0.65rem;
+    border: 1px solid var(--adf-state-border); border-radius: 999px; background: var(--adf-state-bg);
+    color: var(--adf-state-fg); font-size: 0.76rem; font-weight: 700;
+}}
+.adf-condition-dot {{ width: 0.42rem; height: 0.42rem; border-radius: 50%; background: currentColor; }}
+.adf-condition-detail {{ margin-top: 0.5rem; color: {c['text_muted']}; font-size: 0.86rem; line-height: 1.5; }}
 
 /* ==========================================================================
    7. Threshold visualization.
@@ -220,10 +297,14 @@ div[data-testid="stTopNav"], [data-testid="stAppViewBlockContainer"] > div:first
 /* ==========================================================================
    9. Step flow / pipeline diagram.
    ========================================================================== */
-.adf-steps {{ display: flex; flex-wrap: wrap; gap: {SPACING['sm']}; align-items: stretch; }}
+.adf-steps {{ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: {SPACING['md']}; align-items: stretch; }}
 .adf-step {{
-    flex: 1 1 190px; background: {c['surface']}; border: 1px solid {c['border']}; border-radius: {RADIUS['md']};
+    min-width: 0; background: {c['surface']}; border: 1px solid {c['border']}; border-radius: {RADIUS['md']};
     padding: {SPACING['sm']} {SPACING['md']}; position: relative;
+}}
+.adf-step:not(:last-child)::after {{
+    content: "→"; position: absolute; right: calc(-0.625rem - 0.42rem); top: 50%; z-index: 1;
+    width: 0.84rem; transform: translateY(-50%); color: {c['text_faint']}; font-size: 0.9rem; text-align: center;
 }}
 .adf-step-number {{ font-family: {MONO_STACK}; font-size: 0.78rem; color: {c['accent_strong']}; margin-bottom: 0.3rem; }}
 .adf-step-title {{ font-weight: 700; font-size: 0.92rem; color: {c['text']}; margin-bottom: 0.2rem; }}
@@ -327,14 +408,71 @@ table.adf-table td.adf-td-label {{ text-align: left; }}
     transition: border-color {TRANSITION} !important;
 }}
 [data-testid="stFileUploaderDropzone"]:hover {{ border-color: {c['accent']} !important; }}
+[data-testid="stButtonGroup"] button[data-selected="true"] {{
+    border-color: {c['accent']} !important; background: {c['accent_soft_bg']} !important; color: {c['accent_strong']} !important;
+}}
+[data-testid="stButtonGroup"] button:focus-visible {{
+    outline: 2px solid {c['accent_strong']} !important; outline-offset: 2px;
+}}
 [data-testid="stMetricValue"] {{ font-family: {MONO_STACK}; color: {c['text']}; }}
 [data-testid="stExpander"] {{
     border: 1px solid {c['border']} !important; border-radius: {RADIUS['md']} !important; background: {c['surface']} !important;
     transition: border-color {TRANSITION} !important;
 }}
 [data-testid="stExpander"]:hover {{ border-color: {c['border_strong']} !important; }}
+[data-testid="stExpander"]:focus-within {{
+    border-color: {c['accent']} !important; box-shadow: 0 0 0 2px {c['accent_soft_bg']} !important;
+}}
+[data-testid="stExpander"] summary:focus-visible,
+[data-testid="stPageLink"] a:focus-visible,
+[data-testid="stDownloadButton"] button:focus-visible {{
+    outline: 2px solid {c['accent_strong']} !important; outline-offset: 2px;
+}}
 [data-testid="stAlert"] {{ border-radius: {RADIUS['md']}; }}
 [data-testid="stDataFrame"] {{ border: 1px solid {c['border']}; border-radius: {RADIUS['md']}; overflow: hidden; }}
+.st-key-result_explanation {{ margin-top: {SPACING['md']}; }}
+.st-key-next_actions {{
+    padding: 1.5rem {SPACING['lg']}; border: 1px solid {c['border']}; border-radius: {RADIUS['lg']};
+    background: {c['surface']}; box-shadow: {SHADOW['card']};
+}}
+.st-key-robustness_action {{
+    height: 100%; padding: {SPACING['md']}; border: 1px solid {c['border']}; border-radius: {RADIUS['md']};
+    background: {c['surface_alt']};
+}}
+.st-key-robustness_action [data-testid="stPageLink"] a {{
+    color: {c['accent_strong']}; font-weight: 650; text-decoration: none;
+}}
+.st-key-waveform_plot, .st-key-spectrogram_plot {{
+    height: 100%;
+    background: {c['surface']}; border-color: {c['border']} !important; border-radius: {RADIUS['lg']} !important;
+    box-shadow: {SHADOW['card']};
+}}
+[data-testid="stColumn"]:has(.st-key-waveform_plot),
+[data-testid="stColumn"]:has(.st-key-spectrogram_plot) {{ display: flex; }}
+[data-testid="stColumn"]:has(.st-key-waveform_plot) > [data-testid="stVerticalBlock"] > [data-testid="stLayoutWrapper"],
+[data-testid="stColumn"]:has(.st-key-spectrogram_plot) > [data-testid="stVerticalBlock"] > [data-testid="stLayoutWrapper"] {{ flex: 1; }}
+.st-key-waveform_plot [data-testid="stImage"], .st-key-spectrogram_plot [data-testid="stImage"] {{ width: 100%; }}
+.st-key-report_downloads [data-testid="stDownloadButton"] button {{ width: 100%; }}
+.st-key-report_downloads [data-testid="stDownloadButton"] button[kind="primary"] {{
+    background: {c['gradient']}; color: #ffffff; border: none;
+    box-shadow: 0 2px 8px -2px rgba(69,104,242,0.38);
+}}
+.adf-report-id {{
+    display: inline-flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.25rem; padding: 0.3rem 0.6rem;
+    border-radius: 999px; background: {c['surface_alt']}; color: {c['text_muted']}; font-size: 0.76rem;
+    overflow-wrap: anywhere;
+}}
+.adf-report-id strong {{ color: {c['text']}; font-family: {MONO_STACK}; font-weight: 650; }}
+.adf-action-kicker {{
+    color: {c['accent_strong']}; font-size: 0.68rem; font-weight: 750; letter-spacing: 0.1em; text-transform: uppercase;
+}}
+.adf-action-title {{ margin: 0.28rem 0; color: {c['text']}; font-size: 0.96rem; font-weight: 700; }}
+.adf-action-body {{ margin-bottom: {SPACING['sm']}; color: {c['text_muted']}; font-size: 0.82rem; line-height: 1.45; }}
+.adf-research-note {{
+    margin-top: {SPACING['lg']}; padding: {SPACING['md']}; border-left: 3px solid {c['border_strong']};
+    border-radius: 0 {RADIUS['md']} {RADIUS['md']} 0; background: rgba(255,255,255,0.5);
+    color: {c['text_muted']}; font-size: 0.84rem; line-height: 1.55;
+}}
 
 /* ==========================================================================
    14. Motion -- subtle only, respects prefers-reduced-motion.
@@ -352,15 +490,23 @@ table.adf-table td.adf-td-label {{ text-align: left; }}
    ========================================================================== */
 @media (max-width: 900px) {{
     .adf-feature-grid {{ grid-template-columns: repeat(2, 1fr); }}
+    .adf-metadata-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+    .adf-steps {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+    .adf-step::after {{ display: none; }}
 }}
 @media (max-width: 640px) {{
     .adf-headline {{ font-size: 1.7rem; }}
     .adf-result-title {{ font-size: 1.3rem; }}
+    .adf-result {{ padding: {SPACING['md']}; }}
+    .adf-result-header {{ align-items: flex-start; flex-direction: column; }}
+    .adf-result-source {{ max-width: 100%; }}
+    .adf-result-meta {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
     .adf-prob-label {{ width: 68px; font-size: 0.78rem; }}
     .adf-metrics-row {{ gap: {SPACING['md']}; }}
-    .adf-step {{ flex: 1 1 100%; }}
+    .adf-metadata-grid, .adf-steps {{ grid-template-columns: 1fr; }}
     .adf-feature-grid {{ grid-template-columns: 1fr; }}
     .adf-hero-visual {{ flex-basis: 100%; order: -1; }}
+    .st-key-next_actions {{ padding: {SPACING['md']}; }}
 }}
 </style>
 """

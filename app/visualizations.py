@@ -48,7 +48,7 @@ def plot_waveform(waveform: np.ndarray, sample_rate: int) -> matplotlib.figure.F
     stride = max(1, waveform.shape[0] // max(1, plotted.shape[0]))
     time_axis = np.arange(plotted.shape[0]) * stride / sample_rate
 
-    fig = matplotlib.figure.Figure(figsize=(6.2, 2.4), facecolor=PLOT_BG)
+    fig = matplotlib.figure.Figure(figsize=(6.2, 2.6), facecolor=PLOT_BG)
     ax = fig.add_subplot(111)
     ax.set_facecolor(PLOT_BG)
     ax.plot(time_axis, plotted, linewidth=0.8, color=PLOT_LINE)
@@ -104,7 +104,7 @@ def plot_mel_spectrogram(waveform: np.ndarray, sample_rate: int) -> matplotlib.f
     )
     mel_db = librosa.power_to_db(mel, ref=np.max)
 
-    fig = matplotlib.figure.Figure(figsize=(6.2, 2.8), facecolor=PLOT_BG)
+    fig = matplotlib.figure.Figure(figsize=(6.2, 2.6), facecolor=PLOT_BG)
     ax = fig.add_subplot(111)
     ax.set_facecolor(PLOT_BG)
     img = librosa.display.specshow(

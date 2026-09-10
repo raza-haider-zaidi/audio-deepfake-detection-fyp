@@ -850,10 +850,15 @@ def render() -> None:
         with st.spinner("Generating report..."):
             pdf_bytes = build_pdf_report(report_data)
         try:
-            from app.nav import create_robustness_page
+            from app.views.robustness import render as render_robustness
 
-            robustness_page = create_robustness_page()
-        except Exception:  # noqa: BLE001 - nav module optional at import time in isolated tests
+            robustness_page = st.Page(
+                render_robustness,
+                title="Robustness",
+                url_path="robustness",
+                icon=":material/science:",
+            )
+        except Exception:  # noqa: BLE001 - page-link target is optional in isolated view tests
             robustness_page = None
 
         with st.container(key="next_actions"):

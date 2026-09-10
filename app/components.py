@@ -13,6 +13,8 @@ import html as _html
 
 from app.styles import STATE_TOKENS
 
+MetadataRow = tuple[str, str] | tuple[str, str, str]
+
 # ---------------------------------------------------------------------------
 # Brand mark -- an original, simple inline SVG signal/waveform glyph.
 # No external assets, no third-party logo.
@@ -106,16 +108,124 @@ def threshold_visualization_html(observed_spoof_prob: float, threshold: float) -
     )
 
 
-def result_panel_html(state: str, title: str, explanation: str, extra_html: str = "") -> str:
+def result_panel_html(
+    state: str,
+    title: str,
+    explanation: str,
+    extra_html: str = "",
+    *,
+    source_label: str | None = None,
+    metadata: list[tuple[str, str]] | None = None,
+    advisory: str | None = None,
+) -> str:
     tokens = STATE_TOKENS.get(state, STATE_TOKENS["INCONCLUSIVE"])
     style_vars = f"--adf-state-fg:{tokens['fg']};--adf-state-bg:{tokens['bg']};--adf-state-border:{tokens['border']};"
+    source_html = (
+        f'<span class="adf-result-source">{_html.escape(source_label)}</span>'
+        if source_label
+        else ""
+    )
+    metadata_html = ""
+    if metadata:
+        cells = "".join(
+            '<div class="adf-result-meta-cell">'
+            f'<div class="adf-result-meta-label">{_html.escape(label)}</div>'
+            f'<div class="adf-result-meta-value">{_html.escape(str(value))}</div>'
+            "</div>"
+            for label, value in metadata
+        )
+        metadata_html = f'<div class="adf-result-meta">{cells}</div>'
+    advisory_html = (
+        f'<div class="adf-result-advisory">{_html.escape(advisory)}</div>'
+        if advisory
+        else ""
+    )
     return (
         f'<div class="adf-result" style="{style_vars}">'
+        '<div class="adf-result-header">'
         '<div class="adf-result-eyebrow">ANALYSIS RESULT</div>'
-        f'<div class="adf-result-title">{title}</div>'
-        f'<div class="adf-result-explain">{explanation}</div>'
-        f"{extra_html}"
+        f"{source_html}"
         "</div>"
+        f'<div class="adf-result-title">{_html.escape(title)}</div>'
+        f'<div class="adf-result-explain">{_html.escape(explanation)}</div>'
+        f'<div class="adf-result-confidence">{extra_html}</div>'
+        f"{metadata_html}{advisory_html}"
+        "</div>"
+    )
+
+
+def metadata_card_html(title: str, rows: list[MetadataRow]) -> str:
+    """Render one lightweight metadata group.
+
+    A row may include a third value used as the accessible/full-value title,
+    allowing long hashes or paths to be shortened visually without losing the
+    complete underlying value.
+    """
+    items = []
+    for row in rows:
+        label, value = row[0], row[1]
+        full_value = row[2] if len(row) == 3 else value
+        items.append(
+            '<div class="adf-metadata-row">'
+            f'<dt>{_html.escape(str(label))}</dt>'
+            f'<dd title="{_html.escape(str(full_value), quote=True)}">{_html.escape(str(value))}</dd>'
+            "</div>"
+        )
+    return (
+        '<section class="adf-metadata-card">'
+        f'<h3>{_html.escape(title)}</h3>'
+        f'<dl>{"".join(items)}</dl>'
+        "</section>"
+    )
+
+
+def metadata_grid_html(groups: list[tuple[str, list[MetadataRow]]]) -> str:
+    return '<div class="adf-metadata-grid">' + "".join(metadata_card_html(title, rows) for title, rows in groups) + "</div>"
+
+
+def metric_strip_html(items: list[tuple[str, str]]) -> str:
+    cells = "".join(
+        '<div class="adf-metadata-metric">'
+        f'<div class="adf-metadata-metric-label">{_html.escape(label)}</div>'
+        f'<div class="adf-metadata-metric-value" title="{_html.escape(str(value), quote=True)}">{_html.escape(str(value))}</div>'
+        "</div>"
+        for label, value in items
+    )
+    return f'<div class="adf-metadata-strip">{cells}</div>'
+
+
+def media_identity_html(filename: str, metrics: list[tuple[str, str]]) -> str:
+    escaped_filename = _html.escape(filename)
+    return (
+        '<section class="adf-media-identity">'
+        '<div class="adf-media-identity-label">Media identity</div>'
+        f'<div class="adf-media-identity-name" title="{_html.escape(filename, quote=True)}">{escaped_filename}</div>'
+        f"{metric_strip_html(metrics)}"
+        "</section>"
+    )
+
+
+def diagnostics_grid_html(groups: list[tuple[str, list[MetadataRow]]]) -> str:
+    """Backward-compatible alias for the reusable metadata grid."""
+    return metadata_grid_html(groups)
+
+
+def analysis_condition_html(level: str, reasons: list[str] | tuple[str, ...] = ()) -> str:
+    state = {"Good": "BONAFIDE", "Limited": "INCONCLUSIVE", "Poor": "SPOOF"}.get(level, "INCONCLUSIVE")
+    tokens = STATE_TOKENS[state]
+    style_vars = f"--adf-state-fg:{tokens['fg']};--adf-state-bg:{tokens['bg']};--adf-state-border:{tokens['border']};"
+    detail = ""
+    if level != "Good" and reasons:
+        reason_text = " and ".join(str(reason) for reason in reasons)
+        detail = (
+            '<div class="adf-condition-detail">'
+            f"This recording contains {_html.escape(reason_text)}. Detection results should therefore be interpreted cautiously."
+            "</div>"
+        )
+    return (
+        f'<div class="adf-condition" style="{style_vars}">'
+        f'<span class="adf-condition-pill"><span class="adf-condition-dot"></span>Analysis conditions: {_html.escape(level)}</span>'
+        f"{detail}</div>"
     )
 
 
@@ -357,10 +467,72 @@ def render_section_title(title: str, subtitle: str | None = None) -> None:
     st.markdown(markup, unsafe_allow_html=True)
 
 
-def render_result_panel(state: str, title: str, explanation: str, extra_html: str = "") -> None:
+def render_result_panel(
+    state: str,
+    title: str,
+    explanation: str,
+    extra_html: str = "",
+    *,
+    source_label: str | None = None,
+    metadata: list[tuple[str, str]] | None = None,
+    advisory: str | None = None,
+) -> None:
     import streamlit as st
 
-    st.markdown(result_panel_html(state, title, explanation, extra_html), unsafe_allow_html=True)
+    st.markdown(
+        result_panel_html(
+            state,
+            title,
+            explanation,
+            extra_html,
+            source_label=source_label,
+            metadata=metadata,
+            advisory=advisory,
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def render_diagnostics_grid(groups: list[tuple[str, list[MetadataRow]]]) -> None:
+    import streamlit as st
+
+    st.markdown(metadata_grid_html(groups), unsafe_allow_html=True)
+
+
+def render_metadata_card(title: str, rows: list[MetadataRow]) -> None:
+    import streamlit as st
+
+    st.markdown(metadata_card_html(title, rows), unsafe_allow_html=True)
+
+
+def render_metadata_grid(groups: list[tuple[str, list[MetadataRow]]]) -> None:
+    import streamlit as st
+
+    st.markdown(metadata_grid_html(groups), unsafe_allow_html=True)
+
+
+def render_metric_strip(items: list[tuple[str, str]]) -> None:
+    import streamlit as st
+
+    st.markdown(metric_strip_html(items), unsafe_allow_html=True)
+
+
+def render_media_identity(filename: str, metrics: list[tuple[str, str]]) -> None:
+    import streamlit as st
+
+    st.markdown(media_identity_html(filename, metrics), unsafe_allow_html=True)
+
+
+def render_analysis_condition(level: str, reasons: list[str] | tuple[str, ...] = ()) -> None:
+    import streamlit as st
+
+    st.markdown(analysis_condition_html(level, reasons), unsafe_allow_html=True)
+
+
+def render_section_gap() -> None:
+    import streamlit as st
+
+    st.markdown('<div class="adf-section-gap" aria-hidden="true"></div>', unsafe_allow_html=True)
 
 
 def render_probability_comparison(bonafide_prob: float, spoof_prob: float) -> None:
@@ -381,13 +553,6 @@ def render_metric_cards(items: list[tuple[str, str]]) -> None:
     cols = st.columns(len(items))
     for col, (value, label) in zip(cols, items):
         col.markdown(metric_card_html(value, label), unsafe_allow_html=True)
-
-
-def render_metadata_grid(rows: list[tuple[str, str]]) -> None:
-    import streamlit as st
-
-    table = "\n".join(f"| {label} | {value} |" for label, value in rows)
-    st.markdown(f"| | |\n|---|---|\n{table}")
 
 
 def render_evidence_panel(sentences: list[str]) -> None:
@@ -471,12 +636,12 @@ def render_disclaimer() -> None:
     import streamlit as st
 
     st.markdown(
-        '<div class="adf-section-sub" style="margin-top:0.5rem;">'
+        '<aside class="adf-research-note">'
         "<strong>Research prototype.</strong> This detector should not be used as the sole basis "
         "for forensic, legal, security, disciplinary, or identity decisions. Detection "
         "performance can vary with synthesis methods, recording conditions, compression, "
         "language, and background noise."
-        "</div>",
+        "</aside>",
         unsafe_allow_html=True,
     )
 

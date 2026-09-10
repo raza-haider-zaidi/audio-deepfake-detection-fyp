@@ -5,7 +5,13 @@ No Streamlit runtime needed — these are plain string builders.
 
 from app.components import (
     HOW_IT_WORKS_STEPS,
+    analysis_condition_html,
     brand_mark_svg,
+    diagnostics_grid_html,
+    media_identity_html,
+    metadata_card_html,
+    metadata_grid_html,
+    metric_strip_html,
     metrics_row_html,
     probability_bar_html,
     probability_comparison_html,
@@ -63,6 +69,52 @@ def test_result_panel_html_uses_correct_state_tokens_for_each_state():
 def test_result_panel_html_unknown_state_falls_back_to_inconclusive_tokens():
     html = result_panel_html("SOMETHING_UNEXPECTED", "Title", "Explain")
     assert STATE_TOKENS["INCONCLUSIVE"]["fg"] in html
+
+
+def test_result_panel_html_groups_source_metadata_and_advisory():
+    html = result_panel_html(
+        "SPOOF",
+        "Likely AI-Generated / Spoofed",
+        "Explanation",
+        source_label="Audio File",
+        metadata=[("Duration", "3.6 sec"), ("Runtime", "CPU / ONNX")],
+        advisory="Capture advisory",
+    )
+    assert "adf-result-source" in html
+    assert "Audio File" in html
+    assert "3.6 sec" in html
+    assert "CPU / ONNX" in html
+    assert "Capture advisory" in html
+
+
+def test_diagnostics_grid_wraps_groups_and_escapes_values():
+    html = diagnostics_grid_html([("File", [("Filename", "clip<take>.wav")]), ("Signal", [("RMS level", "0.120")])])
+    assert html.count("adf-metadata-card") == 2
+    assert "clip&lt;take&gt;.wav" in html
+    assert "clip<take>.wav" not in html
+
+
+def test_metadata_system_preserves_full_technical_value_in_title():
+    full_hash = "a" * 64
+    html = metadata_card_html("Reproducibility", [("SHA-256", "aaaaaaaaaaaaaaaa…", full_hash)])
+    assert "aaaaaaaaaaaaaaaa…" in html
+    assert f'title="{full_hash}"' in html
+
+
+def test_metadata_grid_strip_and_identity_use_shared_classes():
+    grid = metadata_grid_html([("Media", [("Codec", "PCM")])])
+    strip = metric_strip_html([("Sample rate", "16000 Hz")])
+    identity = media_identity_html("a-very-long-recording-name.wav", [("File size", "188 KB")])
+    assert "adf-metadata-grid" in grid
+    assert "adf-metadata-strip" in strip
+    assert "adf-media-identity-name" in identity
+
+
+def test_analysis_condition_keeps_warning_detail_descriptive():
+    html = analysis_condition_html("Limited", ["high silence", "low level"])
+    assert "Analysis conditions: Limited" in html
+    assert "high silence and low level" in html
+    assert "interpreted cautiously" in html
 
 
 def test_metrics_row_html_renders_all_items():
